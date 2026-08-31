@@ -839,7 +839,28 @@ export default function Home() {
                 {/* Datos de la venta */}
                 {carrito.length > 0 && (
                   <div style={{ padding:'12px 14px', borderTop:`1px solid ${c.border}` }}>
-                    <input style={{ ...s.input, marginBottom:8, padding:'8px 12px', fontSize:12 }} placeholder="Nombre del cliente (opcional)" value={carritoCliente} onChange={e => setCarritoCliente(e.target.value)} />
+                   {/* Item manual */}
+<div style={{ background:c.card2, borderRadius:10, padding:'10px 12px', marginBottom:8 }}>
+  <div style={{ fontSize:11, color:c.muted, marginBottom:6, textTransform:'uppercase', letterSpacing:'.5px' }}>+ Agregar item manual</div>
+  <input style={{ ...s.input, marginBottom:6, padding:'7px 10px', fontSize:12 }} placeholder="Nombre del producto" id="manual-nombre" />
+  <div style={{ display:'flex', gap:6 }}>
+    <input style={{ ...s.input, marginBottom:0, flex:1, padding:'7px 10px', fontSize:12 }} type="number" placeholder="Precio (Gs)" id="manual-precio" />
+    <input style={{ ...s.input, marginBottom:0, width:60, padding:'7px 8px', fontSize:12 }} type="number" placeholder="Cant" defaultValue="1" id="manual-cant" />
+    <button style={{ ...s.btnGreen, padding:'6px 12px', fontSize:12, flexShrink:0 }} onClick={() => {
+      const nombre = (document.getElementById('manual-nombre') as HTMLInputElement)?.value
+      const precio = Number((document.getElementById('manual-precio') as HTMLInputElement)?.value)
+      const cant = Number((document.getElementById('manual-cant') as HTMLInputElement)?.value) || 1
+      if (!nombre || !precio) return
+      const id = 'manual-' + Date.now()
+      setCarrito(prev => [...prev, { id, nombre, precio_venta: precio, cantidad: cant, foto_url: null, stock_actual: 99 }])
+      ;(document.getElementById('manual-nombre') as HTMLInputElement).value = ''
+      ;(document.getElementById('manual-precio') as HTMLInputElement).value = ''
+      ;(document.getElementById('manual-cant') as HTMLInputElement).value = '1'
+    }}>+ Agregar</button>
+  </div>
+</div>
+
+<input style={{ ...s.input, marginBottom:8, padding:'8px 12px', fontSize:12 }} placeholder="Nombre del cliente (opcional)" value={carritoCliente} onChange={e => setCarritoCliente(e.target.value)} />
 
                     {/* Descuento */}
                     <div style={{ display:'flex', gap:6, marginBottom:8 }}>
