@@ -22,7 +22,9 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false)
   const [tipoModal, setTipoModal] = useState('')
   const [busqueda, setBusqueda] = useState('')
+  const [busquedaVenta, setBusquedaVenta] = useState('')
   const [categoriaFiltro, setCategoriaFiltro] = useState('Todas')
+  const [categoriaFiltroVenta, setCategoriaFiltroVenta] = useState('Todas')
   const [ticketVenta, setTicketVenta] = useState<any>(null)
   const [ticketRep, setTicketRep] = useState<any>(null)
   const [fotoPreview, setFotoPreview] = useState('')
@@ -32,15 +34,20 @@ export default function Home() {
   const [editandoCategoria, setEditandoCategoria] = useState<any>(null)
   const [nombreCatEdit, setNombreCatEdit] = useState('')
   const [ventaSeleccionada, setVentaSeleccionada] = useState<any>(null)
-  const [productoVenta, setProductoVenta] = useState<any>(null)
   const [productoEditando, setProductoEditando] = useState<any>(null)
+  // Carrito de ventas
+  const [carrito, setCarrito] = useState<any[]>([])
+  const [carritoCliente, setCarritoCliente] = useState('')
+  const [carritoMetodo, setCarritoMetodo] = useState('Efectivo')
+  const [carritoCuotas, setCarritoCuotas] = useState('2')
+  const [carritoDescTipo, setCarritoDescTipo] = useState('ninguno')
+  const [carritoDescValor, setCarritoDescValor] = useState('')
   const fileRef = useRef<any>(null)
 
   const [formProducto, setFormProducto] = useState({ nombre:'', precio_compra:'', precio_venta:'', stock_actual:'', imei:'', categoria:'General', foto_url:'' })
-  const [formVenta, setFormVenta] = useState({ cliente_nombre:'', nombre_producto:'', precio_unitario:'', cantidad:'1', metodo_pago:'Efectivo', tipoDescuento:'ninguno', descuento:'', cuotas_total:'2' })
   const [formReparacion, setFormReparacion] = useState({ cliente_nombre:'', cliente_telefono:'', cliente_direccion:'', modelo_celular:'', problema_reportado:'', tecnico:'Marcos', costo_estimado:'', garantia:'Sin garantía', observaciones:'' })
   const [formCliente, setFormCliente] = useState({ nombre:'', apellido:'', telefono:'', whatsapp:'', ciudad:'Quiindy' })
-  const [formGasto, setFormGasto] = useState({ descripcion:'', categoria:'General', monto:'', fecha: new Date().toISOString().split('T')[0] })
+  const [formGasto, setFormGasto] = useState({ descripcion:'', categoria:'General', tipo:'Gasto', monto:'', fecha: new Date().toISOString().split('T')[0] })
   const [formPago, setFormPago] = useState({ monto:'', empleado:'Nery', observaciones:'' })
   const [formCaja, setFormCaja] = useState({ tipo:'apertura', empleado:'Nery', monto_inicial:'', observaciones:'' })
 
@@ -79,15 +86,79 @@ export default function Home() {
     setPagosCuotas(pagos || [])
   }
 
-  function calcularDescuentoGs() {
-    const subtotal = Number(formVenta.precio_unitario) * Number(formVenta.cantidad)
-    if (formVenta.tipoDescuento === 'guaranies') return Number(formVenta.descuento || 0)
-    if (formVenta.tipoDescuento === 'porcentaje') return subtotal * Number(formVenta.descuento || 0) / 100
+  // ── CARRITO ─────────────────────────────────────────────
+  function agregarAlCarrito(p: any) {
+    setCarrito(prev => {
+      const existe = prev.find(i => i.id === p.id)
+      if (existe) {
+        return prev.map(i => i.id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i)
+      }
+      return [...prev, { ...p, cantidad: 1 }]
+    })
+  }
+
+  function cambiarCantidadCarrito(id: string, cantidad: number) {
+    if (cantidad <= 0) { quitarDelCarrito(id); return }
+    setCarrito(prev => prev.map(i => i.id === id ? { ...i, cantidad } : i))
+  }
+
+  function quitarDelCarrito(id: string) {
+    setCarrito(prev => prev.filter(i => i.id !== id))
+  }
+
+  function limpiarCarrito() {
+    setCarrito([])
+    setCarritoCliente('')
+    setCarritoMetodo('Efectivo')
+    setCarritoCuotas('2')
+    setCarritoDescTipo('ninguno')
+    setCarritoDescValor('')
+  }
+
+  function calcularCarritoSubtotal() {
+    return carrito.reduce((s, i) => s + i.precio_venta * i.cantidad, 0)
+  }
+
+  function calcularCarritoDescuento() {
+    const sub = calcularCarritoSubtotal()
+    if (carritoDescTipo === 'guaranies') return Number(carritoDescValor || 0)
+    if (carritoDescTipo === 'porcentaje') return sub * Number(carritoDescValor || 0) / 100
     return 0
   }
-  function calcularTotal() {
-    const subtotal = Number(formVenta.precio_unitario) * Number(formVenta.cantidad)
-    return Math.max(0, subtotal - calcularDescuentoGs())
+
+  function calcularCarritoTotal() {
+    return Math.max(0, calcularCarritoSubtotal() - calcularCarritoDescuento())
+  }
+
+  async function confirmarVentaCarrito() {
+    if (carrito.length === 0) { alert('El carrito está vacío'); return }
+    const total = calcularCarritoTotal()
+    const descGs = calcularCarritoDescuento()
+    const cuotas = Number(carritoCuotas)
+    const esCuota = carritoMetodo === 'Cuotas' && cuotas > 1
+    const montoCuota = esCuota ? Math.ceil(total / cuotas) : total
+    const nombreProductos = carrito.map(i => `${i.nombre} x${i.cantidad}`).join(', ')
+
+    const { data, error } = await supabase.from('ventas').insert({
+      cliente_nombre: carritoCliente || null,
+      nombre_producto: nombreProductos,
+      precio_unitario: total,
+      cantidad: carrito.reduce((s, i) => s + i.cantidad, 0),
+      descuento_gs: descGs,
+      total,
+      metodo_pago: carritoMetodo,
+      sucursal: 'Quiindy',
+      cuotas_total: cuotas,
+      cuota_actual: esCuota ? 0 : cuotas,
+      monto_cuota: montoCuota,
+      estado_pago: esCuota ? 'Pendiente' : 'Pagado',
+      saldo_pendiente: esCuota ? total : 0,
+    }).select().single()
+
+    if (error) { alert('Error al registrar: ' + error.message); return }
+    if (data) setTicketVenta({ ...data, items: carrito })
+    limpiarCarrito()
+    cargarTodo()
   }
 
   // ── CATEGORÍAS ──────────────────────────────────────────
@@ -102,9 +173,8 @@ export default function Home() {
   }
   async function guardarEditCategoria(id: string) {
     if (!nombreCatEdit.trim()) return
-    await supabase.from('mis_categorias').update({ nombre: nombreCatEdit.trim() }).eq('id', id)
-    // actualizar productos que tenían el nombre viejo
     const catVieja = categorias.find(c => c.id === id)
+    await supabase.from('mis_categorias').update({ nombre: nombreCatEdit.trim() }).eq('id', id)
     if (catVieja) await supabase.from('productos').update({ categoria: nombreCatEdit.trim() }).eq('categoria', catVieja.nombre)
     setEditandoCategoria(null); setNombreCatEdit(''); cargarTodo()
   }
@@ -147,37 +217,11 @@ export default function Home() {
     setTipoModal('producto'); setShowModal(true)
   }
 
-  function abrirVentaDesdeProducto(p: any) {
-    setProductoVenta(p)
-    setFormVenta({ ...formVenta, nombre_producto: p.nombre, precio_unitario: String(p.precio_venta) })
-    setTipoModal('venta'); setShowModal(true)
-  }
-
   async function eliminarProducto(id: string) { if (!confirm('¿Eliminar?')) return; await supabase.from('productos').update({ activo: false }).eq('id', id); cargarTodo() }
   async function eliminarVenta(id: string) { if (!confirm('¿Eliminar?')) return; await supabase.from('ventas').delete().eq('id', id); cargarTodo() }
   async function eliminarReparacion(id: string) { if (!confirm('¿Eliminar?')) return; await supabase.from('reparaciones').delete().eq('id', id); cargarTodo() }
   async function eliminarCliente(id: string) { if (!confirm('¿Eliminar?')) return; await supabase.from('clientes').delete().eq('id', id); cargarTodo() }
   async function eliminarGasto(id: string) { if (!confirm('¿Eliminar?')) return; await supabase.from('gastos').delete().eq('id', id); cargarTodo() }
-
-  async function guardarVenta() {
-    const total = calcularTotal()
-    const descuentoGs = calcularDescuentoGs()
-    const cuotas = Number(formVenta.cuotas_total)
-    const esCuota = formVenta.metodo_pago === 'Cuotas' && cuotas > 1
-    const montoCuota = esCuota ? Math.ceil(total / cuotas) : total
-    const { data } = await supabase.from('ventas').insert({
-      cliente_nombre: formVenta.cliente_nombre, nombre_producto: formVenta.nombre_producto,
-      precio_unitario: Number(formVenta.precio_unitario), cantidad: Number(formVenta.cantidad),
-      descuento_gs: descuentoGs, total, metodo_pago: formVenta.metodo_pago, sucursal: 'Quiindy',
-      cuotas_total: cuotas, cuota_actual: esCuota ? 0 : cuotas,
-      monto_cuota: montoCuota, estado_pago: esCuota ? 'Pendiente' : 'Pagado',
-      saldo_pendiente: esCuota ? total : 0,
-    }).select().single()
-    setShowModal(false)
-    setFormVenta({ cliente_nombre:'', nombre_producto:'', precio_unitario:'', cantidad:'1', metodo_pago:'Efectivo', tipoDescuento:'ninguno', descuento:'', cuotas_total:'2' })
-    setProductoVenta(null); cargarTodo()
-    if (data) setTicketVenta(data)
-  }
 
   async function registrarPagoParcial() {
     const monto = Number(formPago.monto)
@@ -223,8 +267,13 @@ export default function Home() {
 
   async function guardarGasto() {
     if (!formGasto.descripcion || !formGasto.monto) { alert('Completá descripción y monto'); return }
-    await supabase.from('gastos').insert({ descripcion: formGasto.descripcion, categoria: formGasto.categoria, monto: Number(formGasto.monto), fecha: formGasto.fecha })
-    setShowModal(false); setFormGasto({ descripcion:'', categoria:'General', monto:'', fecha: new Date().toISOString().split('T')[0] }); cargarTodo()
+    await supabase.from('gastos').insert({
+      descripcion: formGasto.descripcion, categoria: formGasto.categoria,
+      tipo: formGasto.tipo, monto: Number(formGasto.monto), fecha: formGasto.fecha,
+    })
+    setShowModal(false)
+    setFormGasto({ descripcion:'', categoria:'General', tipo:'Gasto', monto:'', fecha: new Date().toISOString().split('T')[0] })
+    cargarTodo()
   }
 
   async function guardarCaja() {
@@ -270,16 +319,9 @@ export default function Home() {
   const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
   const hoy = new Date(); hoy.setHours(0,0,0,0)
 
-  // Reparaciones entregadas (generan ingreso)
   const repsEntregadasHoy = reparaciones.filter(r => r.estado === 'Entregado' && new Date(r.updated_at || r.fecha_ingreso) >= hoy)
-  const repsEntregadasMes = reparaciones.filter(r => {
-    const d = new Date(r.updated_at || r.fecha_ingreso)
-    return r.estado === 'Entregado' && d >= inicioMes
-  })
-  const repsEntregadasBalance = reparaciones.filter(r => {
-    const d = new Date(r.updated_at || r.fecha_ingreso)
-    return r.estado === 'Entregado' && d.getMonth() === mesBalance && d.getFullYear() === anioBalance
-  })
+  const repsEntregadasMes = reparaciones.filter(r => { const d = new Date(r.updated_at || r.fecha_ingreso); return r.estado === 'Entregado' && d >= inicioMes })
+  const repsEntregadasBalance = reparaciones.filter(r => { const d = new Date(r.updated_at || r.fecha_ingreso); return r.estado === 'Entregado' && d.getMonth() === mesBalance && d.getFullYear() === anioBalance })
   const ingresoRepsHoy = repsEntregadasHoy.reduce((s: number, r: any) => s + (r.costo_estimado || 0), 0)
   const ingresoRepsMes = repsEntregadasMes.reduce((s: number, r: any) => s + (r.costo_estimado || 0), 0)
   const ingresoRepsBalance = repsEntregadasBalance.reduce((s: number, r: any) => s + (r.costo_estimado || 0), 0)
@@ -288,14 +330,23 @@ export default function Home() {
   const ventasMes = ventas.filter(v => new Date(v.created_at) >= inicioMes)
   const gastosMes = gastos.filter(g => { const d = new Date(g.fecha); return d.getMonth()===ahora.getMonth()&&d.getFullYear()===ahora.getFullYear() })
 
-  // Balances incluyen reparaciones entregadas
-  const balanceHoy = ventasHoy.reduce((s: number, v: any) => s + (v.total||0), 0) + ingresoRepsHoy
-  const balanceMes = ventasMes.reduce((s: number, v: any) => s + (v.total||0), 0) + ingresoRepsMes
-  const totalGastosMes = gastosMes.reduce((s: number, g: any) => s + (g.monto||0), 0)
+  // Solo gastos reales (no inversiones) afectan la ganancia
+  const gastosMesReales = gastosMes.filter(g => g.tipo !== 'Inversión')
+  const inversionesMes = gastosMes.filter(g => g.tipo === 'Inversión')
+
+  const cobradoHoy = ventasHoy.reduce((s: number, v: any) => s + ((v.total||0) - (v.saldo_pendiente||0)), 0)
+  const cobradoMes = ventasMes.reduce((s: number, v: any) => s + ((v.total||0) - (v.saldo_pendiente||0)), 0)
+  const pagosHoy = pagosCuotas.filter((p: any) => { const d = new Date(p.created_at); return d >= hoy })
+  const ingresoPagosHoy = pagosHoy.reduce((s: number, p: any) => s + (p.monto||0), 0)
+
+  const balanceHoy = cobradoHoy + ingresoRepsHoy + ingresoPagosHoy
+  const balanceMes = cobradoMes + ingresoRepsMes
+  const totalGastosMes = gastosMesReales.reduce((s: number, g: any) => s + (g.monto||0), 0)
+  const totalInversionesMes = inversionesMes.reduce((s: number, g: any) => s + (g.monto||0), 0)
   const gananciaNeta = balanceMes - totalGastosMes
+
   const efectivoMes = ventasMes.filter((v: any) => v.metodo_pago==='Efectivo').reduce((s: number, v: any) => s+(v.total||0), 0)
   const transferenciaMes = ventasMes.filter((v: any) => v.metodo_pago==='Transferencia').reduce((s: number, v: any) => s+(v.total||0), 0)
-  const cuotasMes = ventasMes.filter((v: any) => v.metodo_pago==='Cuotas').reduce((s: number, v: any) => s+(v.total||0), 0)
   const repPendientes = reparaciones.filter(r => !['Entregado','Cancelado'].includes(r.estado))
   const stockBajo = productos.filter(p => p.stock_actual <= p.stock_minimo)
   const ventasConDeuda = ventas.filter(v => v.estado_pago === 'Pendiente')
@@ -304,8 +355,11 @@ export default function Home() {
 
   const ventasBalance = ventas.filter(v => { const d = new Date(v.created_at); return d.getMonth()===mesBalance&&d.getFullYear()===anioBalance })
   const gastosBalance = gastos.filter(g => { const d = new Date(g.fecha); return d.getMonth()===mesBalance&&d.getFullYear()===anioBalance })
-  const totalVentasBalance = ventasBalance.reduce((s: number, v: any) => s+(v.total||0), 0) + ingresoRepsBalance
-  const totalGastosBalance = gastosBalance.reduce((s: number, g: any) => s+(g.monto||0), 0)
+  const gastosBalanceReales = gastosBalance.filter(g => g.tipo !== 'Inversión')
+  const inversionesBalance = gastosBalance.filter(g => g.tipo === 'Inversión')
+  const totalVentasBalance = ventasBalance.reduce((s: number, v: any) => s+((v.total||0)-(v.saldo_pendiente||0)), 0) + ingresoRepsBalance
+  const totalGastosBalance = gastosBalanceReales.reduce((s: number, g: any) => s+(g.monto||0), 0)
+  const totalInversionesBalance = inversionesBalance.reduce((s: number, g: any) => s+(g.monto||0), 0)
   const gananciaNetaBalance = totalVentasBalance - totalGastosBalance
   const efectivoBalance = ventasBalance.filter((v: any) => v.metodo_pago==='Efectivo').reduce((s: number, v: any) => s+(v.total||0), 0)
   const transferenciaBalance = ventasBalance.filter((v: any) => v.metodo_pago==='Transferencia').reduce((s: number, v: any) => s+(v.total||0), 0)
@@ -313,6 +367,15 @@ export default function Home() {
 
   const masVendidos = Object.entries(ventasMes.reduce((acc: any, v: any) => { const key=v.nombre_producto||'Sin nombre'; acc[key]=(acc[key]||0)+(v.cantidad||1); return acc }, {})).sort((a: any, b: any) => b[1]-a[1]).slice(0,5)
   const listaCategorias = ['Todas', ...categorias.map((cat: any) => cat.nombre)]
+
+  // Productos filtrados para carrito
+  const productosFiltradosVenta = productos.filter(p => {
+    const matchB = p.nombre.toLowerCase().includes(busquedaVenta.toLowerCase())
+    const matchC = categoriaFiltroVenta==='Todas' || p.categoria===categoriaFiltroVenta
+    return matchB && matchC
+  })
+
+  // Productos filtrados para stock
   const productosFiltrados = productos.filter(p => {
     const matchB = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || (p.imei && p.imei.includes(busqueda))
     const matchC = categoriaFiltro==='Todas' || p.categoria===categoriaFiltro
@@ -323,18 +386,13 @@ export default function Home() {
     if (prods.length > 0) acc[cat.nombre] = prods
     return acc
   }, {} as any)
-  const subtotalVenta = Number(formVenta.precio_unitario) * Number(formVenta.cantidad)
-  const descuentoGs = calcularDescuentoGs()
-  const totalVenta = calcularTotal()
 
   const cajaHoy = cajaRegistros.filter(c => { const d = new Date(c.created_at); return d >= hoy })
   const cajaAbierta = cajaHoy.find((c: any) => c.tipo==='apertura')
   const cajaCerrada = cajaHoy.find((c: any) => c.tipo==='cierre')
   const estadoCaja = cajaAbierta && !cajaCerrada ? 'abierta' : cajaCerrada ? 'cerrada' : 'sin abrir'
 
-  // ── ESTILOS ──────────────────────────────────────────────
   const s = {
-    // SIDEBAR FIJO: la app ocupa 100vh sin overflow, solo el content hace scroll
     app: { display:'flex', height:'100vh', overflow:'hidden', background:c.bg, fontFamily:'sans-serif', transition:'background .2s' },
     sidebar: { width:210, minWidth:210, height:'100vh', background:c.sidebar, borderRight:`1px solid ${c.border}`, display:'flex', flexDirection:'column' as const, flexShrink:0 },
     main: { flex:1, display:'flex', flexDirection:'column' as const, minWidth:0, height:'100vh', overflow:'hidden' },
@@ -356,16 +414,11 @@ export default function Home() {
     modal: { background:c.modal, border:`1px solid ${c.border}`, borderRadius:20, padding:24, width:'100%', maxWidth:460, maxHeight:'90vh', overflowY:'auto' as const },
   }
 
-  // Estilos de impresión: ticket térmico optimizado para 58mm/80mm
   const printStyle = `
     @media print {
       body * { visibility: hidden !important; }
       .print-area, .print-area * { visibility: visible !important; }
-      .print-area {
-        position: fixed !important; top: 0 !important; left: 0 !important;
-        width: 100% !important; z-index: 9999 !important;
-        background: white !important;
-      }
+      .print-area { position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; z-index: 9999 !important; background: white !important; }
       .no-print { display: none !important; }
       @page { margin: 0; size: 80mm auto; }
     }
@@ -397,29 +450,44 @@ export default function Home() {
     return <div style={{ fontSize:11, color:c.muted, textTransform:'uppercase', letterSpacing:'.6px', marginBottom:6 }}>{text}</div>
   }
 
-  function ProductoCard({ p }: any) {
+  function ProductoCardStock({ p }: any) {
     return (
       <div style={{ background:c.card2, border:`1px solid ${c.border}`, borderRadius:12, padding:12, transition:'border-color .15s' }}
         onMouseEnter={e => (e.currentTarget as any).style.borderColor='rgba(26,58,255,0.5)'}
         onMouseLeave={e => (e.currentTarget as any).style.borderColor=c.border}>
-        {/* Imagen con proporción correcta, sin deformación */}
-        <div style={{ width:'100%', height:100, background:c.card, borderRadius:8, marginBottom:8, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-          {p.foto_url
-            ? <img src={p.foto_url} alt={p.nombre} style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain', borderRadius:6 }} />
-            : <span style={{ fontSize:32, opacity:.3 }}>📱</span>
-          }
+        <div style={{ width:'100%', height:90, background:c.card, borderRadius:8, marginBottom:8, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+          {p.foto_url ? <img src={p.foto_url} alt={p.nombre} style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }} /> : <span style={{ fontSize:28, opacity:.3 }}>📱</span>}
         </div>
-        <div style={{ fontWeight:600, fontSize:13, color:c.text, marginBottom:4 }}>{p.nombre}</div>
-        <div style={{ fontSize:11, color:c.muted }}>Venta: {formatGs(p.precio_venta)}</div>
-        <div style={{ fontSize:11, color:'#00D97E', marginBottom:8 }}>+{formatGs(p.precio_venta - p.precio_compra)}</div>
-        <div style={{ fontSize:11, color:p.stock_actual<=p.stock_minimo?'#FF4B6E':c.muted, marginBottom:6 }}>
-          Stock: {p.stock_actual}{p.stock_actual<=p.stock_minimo&&' ⚠️'}
-        </div>
-        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-          <button style={{ ...s.btnYellow, padding:'4px 10px', fontSize:11 }} onClick={() => abrirVentaDesdeProducto(p)}>💰 Vender</button>
-          <button style={{ ...s.btnBlue, padding:'4px 8px' }} onClick={() => abrirEditar(p)}>✏️</button>
+        <div style={{ fontWeight:600, fontSize:12, color:c.text, marginBottom:4 }}>{p.nombre}</div>
+        <div style={{ fontSize:11, color:'#00D97E', marginBottom:6 }}>{formatGs(p.precio_venta)}</div>
+        <div style={{ fontSize:10, color:p.stock_actual<=p.stock_minimo?'#FF4B6E':c.muted, marginBottom:6 }}>Stock: {p.stock_actual}</div>
+        <div style={{ display:'flex', gap:4 }}>
+          <button style={{ ...s.btnBlue, padding:'4px 8px', fontSize:11 }} onClick={() => abrirEditar(p)}>✏️</button>
           <button style={{ ...s.btnRed, padding:'4px 8px' }} onClick={() => eliminarProducto(p.id)}>🗑</button>
         </div>
+      </div>
+    )
+  }
+
+  // Tarjeta de producto para el carrito de ventas
+  function ProductoCardVenta({ p }: any) {
+    const enCarrito = carrito.find(i => i.id === p.id)
+    return (
+      <div onClick={() => agregarAlCarrito(p)}
+        style={{ background:enCarrito?'rgba(26,58,255,0.12)':c.card2, border:`2px solid ${enCarrito?'#1A3AFF':c.border}`, borderRadius:12, padding:10, cursor:'pointer', transition:'all .15s', position:'relative' as const }}
+        onMouseEnter={e => { if (!enCarrito) (e.currentTarget as any).style.borderColor='rgba(26,58,255,0.4)' }}
+        onMouseLeave={e => { if (!enCarrito) (e.currentTarget as any).style.borderColor=c.border }}>
+        {enCarrito && (
+          <div style={{ position:'absolute', top:6, right:6, background:'#1A3AFF', color:'#fff', borderRadius:50, width:20, height:20, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700 }}>
+            {enCarrito.cantidad}
+          </div>
+        )}
+        <div style={{ width:'100%', height:80, background:c.card, borderRadius:8, marginBottom:6, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+          {p.foto_url ? <img src={p.foto_url} alt={p.nombre} style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }} /> : <span style={{ fontSize:24, opacity:.3 }}>📱</span>}
+        </div>
+        <div style={{ fontWeight:600, fontSize:11, color:c.text, marginBottom:2, lineHeight:1.3 }}>{p.nombre}</div>
+        <div style={{ fontSize:12, color:'#00D97E', fontWeight:700 }}>{formatGs(p.precio_venta)}</div>
+        <div style={{ fontSize:10, color:p.stock_actual<=0?'#FF4B6E':c.muted }}>Stock: {p.stock_actual}</div>
       </div>
     )
   }
@@ -439,10 +507,10 @@ export default function Home() {
             <div style={{ fontSize:11, color:'#666' }}>Generado: {new Date().toLocaleDateString('es-PY')}</div>
           </div>
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:20 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:16 }}>
           {[
             { label:'Total ingresos', value:formatGs(totalVentasBalance), color:'#1A3AFF' },
-            { label:'Total gastos', value:formatGs(totalGastosBalance), color:'#FF4B6E' },
+            { label:'Gastos operativos', value:formatGs(totalGastosBalance), color:'#FF4B6E' },
             { label:'Ganancia neta', value:formatGs(gananciaNetaBalance), color:gananciaNetaBalance>=0?'#00A86B':'#FF4B6E' },
           ].map(item => (
             <div key={item.label} style={{ border:'2px solid #eee', borderRadius:10, padding:14, textAlign:'center' }}>
@@ -451,6 +519,15 @@ export default function Home() {
             </div>
           ))}
         </div>
+        {totalInversionesBalance > 0 && (
+          <div style={{ background:'#FFF8E0', border:'1px solid #FFD600', borderRadius:10, padding:'10px 14px', marginBottom:16, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:'#B8860B' }}>💼 Inversiones del mes</div>
+              <div style={{ fontSize:11, color:'#666' }}>No se descuentan de la ganancia neta</div>
+            </div>
+            <div style={{ fontSize:16, fontWeight:700, color:'#B8860B' }}>{formatGs(totalInversionesBalance)}</div>
+          </div>
+        )}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:20 }}>
           {[
             { label:'Efectivo', value:formatGs(efectivoBalance), color:'#00A86B' },
@@ -463,30 +540,20 @@ export default function Home() {
             </div>
           ))}
         </div>
-        {ingresoRepsBalance > 0 && (
-          <div style={{ background:'#F0FFF8', border:'1px solid #00A86B', borderRadius:10, padding:'10px 14px', marginBottom:16, display:'flex', justifyContent:'space-between' }}>
-            <span style={{ fontSize:12, color:'#666' }}>Ingresos por reparaciones entregadas</span>
-            <span style={{ fontWeight:700, color:'#00A86B' }}>{formatGs(ingresoRepsBalance)}</span>
-          </div>
-        )}
-        <div style={{ fontSize:12, fontWeight:700, marginBottom:8, color:'#1A3AFF', textTransform:'uppercase', letterSpacing:'.5px' }}>Detalle de ventas ({ventasBalance.length})</div>
+        <div style={{ fontSize:12, fontWeight:700, marginBottom:8, color:'#1A3AFF', textTransform:'uppercase', letterSpacing:'.5px' }}>Ventas ({ventasBalance.length})</div>
         <table style={{ width:'100%', borderCollapse:'collapse', marginBottom:20 }}>
           <thead>
             <tr style={{ background:'#1A3AFF' }}>
-              {['Fecha','Producto','Cliente','Cant.','Descuento','Método','Estado','Total'].map(h => (
-                <th key={h} style={{ color:'#fff', fontSize:10, padding:'7px 8px', textAlign:'left', fontWeight:600 }}>{h}</th>
-              ))}
+              {['Fecha','Producto','Cliente','Método','Estado','Total'].map(h => <th key={h} style={{ color:'#fff', fontSize:10, padding:'7px 8px', textAlign:'left', fontWeight:600 }}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {ventasBalance.length===0 && <tr><td colSpan={8} style={{ padding:16, textAlign:'center', color:'#888', fontSize:12 }}>Sin ventas en este período</td></tr>}
+            {ventasBalance.length===0 && <tr><td colSpan={6} style={{ padding:16, textAlign:'center', color:'#888', fontSize:12 }}>Sin ventas en este período</td></tr>}
             {ventasBalance.map((v: any, i: number) => (
               <tr key={v.id} style={{ background:i%2===0?'#F8FAFF':'#fff' }}>
                 <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee' }}>{formatFecha(v.created_at)}</td>
                 <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee', fontWeight:500 }}>{v.nombre_producto||'—'}</td>
                 <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee' }}>{v.cliente_nombre||'—'}</td>
-                <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee', textAlign:'center' }}>{v.cantidad}</td>
-                <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee', color:'#FF4B6E' }}>{v.descuento_gs>0?`-${formatGs(v.descuento_gs)}`:'—'}</td>
                 <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee' }}>{v.metodo_pago}</td>
                 <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee' }}>
                   <span style={{ background:v.estado_pago==='Pagado'?'#00A86B':'#FF8C00', color:'#fff', padding:'1px 6px', borderRadius:50, fontSize:9 }}>{v.estado_pago||'Pagado'}</span>
@@ -497,23 +564,21 @@ export default function Home() {
           </tbody>
           <tfoot>
             <tr style={{ background:'#1A3AFF' }}>
-              <td colSpan={7} style={{ padding:'7px 8px', color:'#fff', fontWeight:700, fontSize:12 }}>TOTAL INGRESOS (ventas + reparaciones)</td>
+              <td colSpan={5} style={{ padding:'7px 8px', color:'#fff', fontWeight:700, fontSize:12 }}>TOTAL INGRESOS</td>
               <td style={{ padding:'7px 8px', color:'#FFD600', fontWeight:700, fontSize:14 }}>{formatGs(totalVentasBalance)}</td>
             </tr>
           </tfoot>
         </table>
-        <div style={{ fontSize:12, fontWeight:700, marginBottom:8, color:'#FF4B6E', textTransform:'uppercase', letterSpacing:'.5px' }}>Detalle de gastos ({gastosBalance.length})</div>
-        <table style={{ width:'100%', borderCollapse:'collapse', marginBottom:20 }}>
+        <div style={{ fontSize:12, fontWeight:700, marginBottom:8, color:'#FF4B6E', textTransform:'uppercase', letterSpacing:'.5px' }}>Gastos operativos ({gastosBalanceReales.length})</div>
+        <table style={{ width:'100%', borderCollapse:'collapse', marginBottom:12 }}>
           <thead>
             <tr style={{ background:'#FF4B6E' }}>
-              {['Fecha','Descripción','Categoría','Monto'].map(h => (
-                <th key={h} style={{ color:'#fff', fontSize:10, padding:'7px 8px', textAlign:'left', fontWeight:600 }}>{h}</th>
-              ))}
+              {['Fecha','Descripción','Categoría','Monto'].map(h => <th key={h} style={{ color:'#fff', fontSize:10, padding:'7px 8px', textAlign:'left', fontWeight:600 }}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {gastosBalance.length===0 && <tr><td colSpan={4} style={{ padding:16, textAlign:'center', color:'#888', fontSize:12 }}>Sin gastos en este período</td></tr>}
-            {gastosBalance.map((g: any, i: number) => (
+            {gastosBalanceReales.length===0 && <tr><td colSpan={4} style={{ padding:16, textAlign:'center', color:'#888', fontSize:12 }}>Sin gastos en este período</td></tr>}
+            {gastosBalanceReales.map((g: any, i: number) => (
               <tr key={g.id} style={{ background:i%2===0?'#FFF8F8':'#fff' }}>
                 <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee' }}>{formatFecha(g.fecha)}</td>
                 <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee', fontWeight:500 }}>{g.descripcion}</td>
@@ -529,10 +594,39 @@ export default function Home() {
             </tr>
           </tfoot>
         </table>
+        {inversionesBalance.length > 0 && (
+          <>
+            <div style={{ fontSize:12, fontWeight:700, marginBottom:8, color:'#B8860B', textTransform:'uppercase', letterSpacing:'.5px' }}>Inversiones ({inversionesBalance.length})</div>
+            <table style={{ width:'100%', borderCollapse:'collapse', marginBottom:20 }}>
+              <thead>
+                <tr style={{ background:'#B8860B' }}>
+                  {['Fecha','Descripción','Categoría','Monto'].map(h => <th key={h} style={{ color:'#fff', fontSize:10, padding:'7px 8px', textAlign:'left', fontWeight:600 }}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {inversionesBalance.map((g: any, i: number) => (
+                  <tr key={g.id} style={{ background:i%2===0?'#FFFDF0':'#fff' }}>
+                    <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee' }}>{formatFecha(g.fecha)}</td>
+                    <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee', fontWeight:500 }}>{g.descripcion}</td>
+                    <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee' }}>{g.categoria}</td>
+                    <td style={{ padding:'6px 8px', fontSize:11, borderBottom:'1px solid #eee', fontWeight:600, color:'#B8860B' }}>{formatGs(g.monto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background:'#B8860B' }}>
+                  <td colSpan={3} style={{ padding:'7px 8px', color:'#fff', fontWeight:700, fontSize:12 }}>TOTAL INVERSIONES</td>
+                  <td style={{ padding:'7px 8px', color:'#fff', fontWeight:700, fontSize:14 }}>{formatGs(totalInversionesBalance)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </>
+        )}
         <div style={{ background:gananciaNetaBalance>=0?'#F0FFF8':'#FFF0F0', border:`2px solid ${gananciaNetaBalance>=0?'#00A86B':'#FF4B6E'}`, borderRadius:12, padding:16, marginBottom:16, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <div>
             <div style={{ fontSize:11, color:'#888', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Ganancia neta del mes</div>
-            <div style={{ fontSize:11, color:'#666' }}>Ingresos {formatGs(totalVentasBalance)} — Gastos {formatGs(totalGastosBalance)}</div>
+            <div style={{ fontSize:11, color:'#666' }}>Ingresos {formatGs(totalVentasBalance)} — Gastos operativos {formatGs(totalGastosBalance)}</div>
+            {totalInversionesBalance > 0 && <div style={{ fontSize:11, color:'#B8860B' }}>Inversiones realizadas: {formatGs(totalInversionesBalance)} (no afectan la ganancia)</div>}
           </div>
           <div style={{ fontSize:28, fontWeight:700, color:gananciaNetaBalance>=0?'#00A86B':'#FF4B6E' }}>{formatGs(gananciaNetaBalance)}</div>
         </div>
@@ -548,7 +642,7 @@ export default function Home() {
     <div style={s.app}>
       <style>{printStyle}</style>
 
-      {/* ── SIDEBAR FIJO ── */}
+      {/* SIDEBAR */}
       <aside style={s.sidebar}>
         <div style={{ padding:'20px 16px', borderBottom:`1px solid ${c.border}` }}>
           <div style={{ display:'inline-flex', alignItems:'center', gap:8, background:'linear-gradient(135deg,#1A3AFF,#5BC4F5)', borderRadius:50, padding:'6px 14px 6px 8px' }}>
@@ -558,12 +652,13 @@ export default function Home() {
         </div>
         <nav style={{ padding:'12px 10px', flex:1, overflowY:'auto' }}>
           <NavItem id="dashboard" label="Dashboard" emoji="⚡" />
+          <NavItem id="ventas" label="Nueva venta" emoji="🛒" badge={carrito.length} badgeColor="yellow" />
+          <NavItem id="historial" label="Historial ventas" emoji="💰" />
           <NavItem id="stock" label="Stock" emoji="📦" badge={stockBajo.length} />
-          <NavItem id="ventas" label="Ventas" emoji="💰" />
           <NavItem id="cuotas" label="Cuotas / Deudas" emoji="📋" badge={ventasConDeuda.length} badgeColor="yellow" />
           <NavItem id="tecnico" label="Técnico" emoji="🔧" badge={repPendientes.length} />
           <NavItem id="clientes" label="Clientes" emoji="👥" />
-          <NavItem id="gastos" label="Gastos" emoji="💸" />
+          <NavItem id="gastos" label="Gastos / Inversiones" emoji="💸" />
           <NavItem id="caja" label="Caja" emoji="🏦" />
           <NavItem id="balance" label="Balance" emoji="📊" />
           <NavItem id="categorias" label="Categorías" emoji="📁" />
@@ -582,23 +677,30 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* ── MAIN ── */}
+      {/* MAIN */}
       <div style={s.main}>
         <header style={s.topbar}>
           <span style={{ fontWeight:700, fontSize:15, color:c.text }}>
-            {seccion==='dashboard'&&'⚡ Dashboard'}{seccion==='stock'&&'📦 Stock'}{seccion==='ventas'&&'💰 Ventas'}
-            {seccion==='cuotas'&&'📋 Cuotas y Deudas'}{seccion==='tecnico'&&'🔧 Servicio Técnico'}{seccion==='clientes'&&'👥 Clientes'}
-            {seccion==='gastos'&&'💸 Gastos'}{seccion==='caja'&&'🏦 Caja'}{seccion==='balance'&&'📊 Balance'}{seccion==='categorias'&&'📁 Categorías'}
+            {seccion==='dashboard'&&'⚡ Dashboard'}
+            {seccion==='ventas'&&'🛒 Nueva venta'}
+            {seccion==='historial'&&'💰 Historial de ventas'}
+            {seccion==='stock'&&'📦 Stock'}
+            {seccion==='cuotas'&&'📋 Cuotas y Deudas'}
+            {seccion==='tecnico'&&'🔧 Servicio Técnico'}
+            {seccion==='clientes'&&'👥 Clientes'}
+            {seccion==='gastos'&&'💸 Gastos e Inversiones'}
+            {seccion==='caja'&&'🏦 Caja'}
+            {seccion==='balance'&&'📊 Balance'}
+            {seccion==='categorias'&&'📁 Categorías'}
           </span>
           <div style={{ marginLeft:'auto', display:'flex', gap:10, alignItems:'center' }}>
             {seccion==='stock' && <>
               <input style={{ ...s.input, marginBottom:0, maxWidth:200, padding:'7px 12px' }} placeholder="🔍 Buscar..." value={busqueda} onChange={e => setBusqueda(e.target.value)} />
               <button style={s.btnYellow} onClick={() => { setProductoEditando(null); setFormProducto({ nombre:'', precio_compra:'', precio_venta:'', stock_actual:'', imei:'', categoria:'General', foto_url:'' }); setFotoPreview(''); setTipoModal('producto'); setShowModal(true) }}>+ Producto</button>
             </>}
-            {seccion==='ventas' && <button style={s.btnYellow} onClick={() => { setTipoModal('venta'); setShowModal(true) }}>+ Registrar venta</button>}
             {seccion==='tecnico' && <button style={s.btnYellow} onClick={() => { setTipoModal('reparacion'); setShowModal(true) }}>+ Registrar equipo</button>}
             {seccion==='clientes' && <button style={s.btnYellow} onClick={() => { setTipoModal('cliente'); setShowModal(true) }}>+ Agregar cliente</button>}
-            {seccion==='gastos' && <button style={s.btnYellow} onClick={() => { setTipoModal('gasto'); setShowModal(true) }}>+ Registrar gasto</button>}
+            {seccion==='gastos' && <button style={s.btnYellow} onClick={() => { setTipoModal('gasto'); setShowModal(true) }}>+ Registrar</button>}
             {seccion==='caja' && <button style={s.btnYellow} onClick={() => { setTipoModal('caja'); setShowModal(true) }}>+ Abrir / Cerrar caja</button>}
             {seccion==='balance' && <button style={s.btnYellow} onClick={() => window.print()}>🖨 Imprimir balance</button>}
           </div>
@@ -606,27 +708,30 @@ export default function Home() {
 
         <div style={s.content}>
 
-          {/* ── DASHBOARD ── */}
+          {/* DASHBOARD */}
           {seccion==='dashboard' && (
             <div>
-              {/* Sin alertas en dashboard — están en sus secciones correspondientes */}
               <div style={s.grid4}>
                 <StatCard label="Balance hoy" value={formatGs(balanceHoy)} color="#00D97E" emoji="📅" />
                 <StatCard label={`Ingresos ${mesActual}`} value={formatGs(balanceMes)} color="#5BC4F5" emoji="📆" />
-                <StatCard label={`Gastos ${mesActual}`} value={formatGs(totalGastosMes)} color="#FF4B6E" emoji="💸" />
+                <StatCard label="Gastos operativos" value={formatGs(totalGastosMes)} color="#FF4B6E" emoji="💸" />
                 <StatCard label="Ganancia neta" value={formatGs(gananciaNeta)} color={gananciaNeta>=0?'#00D97E':'#FF4B6E'} emoji="💎" sub={gananciaNeta>=0?'✅ Positivo':'⚠️ Negativo'} />
               </div>
+              {totalInversionesMes > 0 && (
+                <div style={{ background:'rgba(255,214,0,0.07)', border:'1px solid rgba(255,214,0,0.2)', borderRadius:12, padding:'10px 14px', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:13, color:'#FFD600' }}>💼 Inversiones del mes (no afectan ganancia)</span>
+                  <span style={{ fontWeight:700, color:'#FFD600' }}>{formatGs(totalInversionesMes)}</span>
+                </div>
+              )}
               <div style={s.grid2}>
                 <div style={s.card}>
                   <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:4 }}>💰 Ingresos de hoy</div>
-                  <div style={{ fontSize:11, color:c.muted, marginBottom:12 }}>
-                    {ventasHoy.length} ventas · {repsEntregadasHoy.length} reparaciones · {formatGs(balanceHoy)}
-                  </div>
+                  <div style={{ fontSize:11, color:c.muted, marginBottom:12 }}>{ventasHoy.length} ventas · {repsEntregadasHoy.length} reparaciones · {formatGs(balanceHoy)}</div>
                   {ventasHoy.length===0 && repsEntregadasHoy.length===0 && <p style={{ color:c.muted, fontSize:12 }}>Sin ingresos hoy todavía</p>}
                   {ventasHoy.map((v: any) => (
                     <div key={v.id} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:`1px solid ${c.border}`, fontSize:13 }}>
                       <span style={{ color:c.text }}>🛍 {v.nombre_producto||v.cliente_nombre||'—'}</span>
-                      <span style={{ color:'#00D97E', fontWeight:600 }}>{formatGs(v.total)}</span>
+                      <span style={{ color:'#00D97E', fontWeight:600 }}>{formatGs((v.total||0)-(v.saldo_pendiente||0))}</span>
                     </div>
                   ))}
                   {repsEntregadasHoy.map((r: any) => (
@@ -639,9 +744,9 @@ export default function Home() {
                 <div style={s.card}>
                   <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:4 }}>📆 Resumen {mesActual}</div>
                   <div style={{ fontSize:28, fontWeight:700, color:gananciaNeta>=0?'#00D97E':'#FF4B6E', margin:'8px 0' }}>{formatGs(gananciaNeta)}</div>
-                  <div style={{ fontSize:12, color:c.muted, marginBottom:3 }}>📈 Ventas: {formatGs(ventasMes.reduce((s: number, v: any) => s+(v.total||0), 0))}</div>
-                  {ingresoRepsMes > 0 && <div style={{ fontSize:12, color:c.muted, marginBottom:3 }}>🔧 Reparaciones: {formatGs(ingresoRepsMes)}</div>}
+                  <div style={{ fontSize:12, color:c.muted, marginBottom:3 }}>📈 Ingresos: {formatGs(balanceMes)}</div>
                   <div style={{ fontSize:12, color:'#FF4B6E', marginBottom:3 }}>📉 Gastos: {formatGs(totalGastosMes)}</div>
+                  {totalInversionesMes>0 && <div style={{ fontSize:12, color:'#FFD600', marginBottom:3 }}>💼 Inversiones: {formatGs(totalInversionesMes)}</div>}
                   <div style={{ fontSize:12, color:c.muted, marginBottom:3 }}>💵 Efectivo: {formatGs(efectivoMes)}</div>
                   <div style={{ fontSize:12, color:c.muted, marginBottom:12 }}>📲 Transferencia: {formatGs(transferenciaMes)}</div>
                   <button style={s.btnYellow} onClick={() => setSeccion('balance')}>Ver balance completo →</button>
@@ -673,38 +778,122 @@ export default function Home() {
             </div>
           )}
 
-          {/* ── STOCK ── */}
-          {seccion==='stock' && (
-            <div>
-              <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:14 }}>
-                {listaCategorias.map(cat => (
-                  <button key={cat} onClick={() => setCategoriaFiltro(cat)} style={{ background:categoriaFiltro===cat?'#1A3AFF':c.input, color:categoriaFiltro===cat?'#fff':c.muted, border:`1px solid ${categoriaFiltro===cat?'#1A3AFF':c.border}`, borderRadius:50, padding:'5px 14px', fontSize:12, cursor:'pointer' }}>{cat}</button>
-                ))}
+          {/* ── NUEVA VENTA CON CARRITO ── */}
+          {seccion==='ventas' && (
+            <div style={{ display:'flex', gap:16, height:'calc(100vh - 96px)' }}>
+
+              {/* Panel izquierdo: productos */}
+              <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
+                {/* Filtros */}
+                <div style={{ display:'flex', gap:8, marginBottom:10, flexWrap:'wrap' }}>
+                  <input style={{ ...s.input, marginBottom:0, flex:1, minWidth:140, padding:'7px 12px' }} placeholder="🔍 Buscar producto..." value={busquedaVenta} onChange={e => setBusquedaVenta(e.target.value)} />
+                  <select style={{ ...s.input, marginBottom:0, width:'auto', padding:'7px 12px' }} value={categoriaFiltroVenta} onChange={e => setCategoriaFiltroVenta(e.target.value)}>
+                    <option value="Todas">Todas</option>
+                    {categorias.map((cat: any) => <option key={cat.id} value={cat.nombre}>{cat.nombre}</option>)}
+                  </select>
+                </div>
+                {/* Grilla de productos */}
+                <div style={{ flex:1, overflowY:'auto', display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))', gap:8, alignContent:'start' }}>
+                  {productosFiltradosVenta.length===0 && (
+                    <div style={{ gridColumn:'1/-1', textAlign:'center', color:c.muted, padding:40 }}>Sin productos</div>
+                  )}
+                  {productosFiltradosVenta.map((p: any) => <ProductoCardVenta key={p.id} p={p} />)}
+                </div>
               </div>
-              {categoriaFiltro==='Todas' && !busqueda ? (
-                Object.keys(productosAgrupados).length===0
-                  ? <div style={{ ...s.card, textAlign:'center', color:c.muted, padding:40 }}>Sin productos. ¡Agregá el primero!</div>
-                  : Object.entries(productosAgrupados).map(([cat, prods]: any) => (
-                    <div key={cat} style={s.card}>
-                      <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:12 }}>📁 {cat} ({prods.length})</div>
-                      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:10 }}>
-                        {prods.map((p: any) => <ProductoCard key={p.id} p={p} />)}
+
+              {/* Panel derecho: carrito */}
+              <div style={{ width:300, minWidth:300, background:c.card, border:`1px solid ${c.border}`, borderRadius:16, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+                <div style={{ padding:'14px 16px', borderBottom:`1px solid ${c.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <span style={{ fontWeight:700, fontSize:14, color:c.text }}>🛒 Carrito ({carrito.length})</span>
+                  {carrito.length > 0 && <button style={{ ...s.btnRed, padding:'3px 10px', fontSize:11 }} onClick={limpiarCarrito}>Vaciar</button>}
+                </div>
+
+                {/* Items del carrito */}
+                <div style={{ flex:1, overflowY:'auto', padding:'10px 12px' }}>
+                  {carrito.length===0 && (
+                    <div style={{ textAlign:'center', padding:30, color:c.muted }}>
+                      <div style={{ fontSize:32, marginBottom:8 }}>🛒</div>
+                      <div style={{ fontSize:12 }}>Tocá un producto para agregarlo</div>
+                    </div>
+                  )}
+                  {carrito.map((item: any) => (
+                    <div key={item.id} style={{ background:c.card2, borderRadius:10, padding:'10px 12px', marginBottom:8 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 }}>
+                        <span style={{ fontSize:12, fontWeight:600, color:c.text, flex:1, marginRight:8 }}>{item.nombre}</span>
+                        <button style={{ ...s.btnRed, padding:'1px 7px', fontSize:10 }} onClick={() => quitarDelCarrito(item.id)}>✕</button>
+                      </div>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                          <button onClick={() => cambiarCantidadCarrito(item.id, item.cantidad - 1)}
+                            style={{ width:24, height:24, borderRadius:50, background:'rgba(255,75,110,0.15)', border:'none', color:'#FF4B6E', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
+                          <span style={{ fontSize:13, fontWeight:700, color:c.text, minWidth:20, textAlign:'center' }}>{item.cantidad}</span>
+                          <button onClick={() => cambiarCantidadCarrito(item.id, item.cantidad + 1)}
+                            style={{ width:24, height:24, borderRadius:50, background:'rgba(0,217,126,0.15)', border:'none', color:'#00D97E', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center' }}>+</button>
+                        </div>
+                        <span style={{ fontSize:13, fontWeight:700, color:'#00D97E' }}>{formatGs(item.precio_venta * item.cantidad)}</span>
                       </div>
                     </div>
-                  ))
-              ) : (
-                <div style={s.card}>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:10 }}>
-                    {productosFiltrados.map((p: any) => <ProductoCard key={p.id} p={p} />)}
-                    {productosFiltrados.length===0 && <div style={{ gridColumn:'1/-1', textAlign:'center', color:c.muted, padding:32 }}>No se encontraron productos</div>}
-                  </div>
+                  ))}
                 </div>
-              )}
+
+                {/* Datos de la venta */}
+                {carrito.length > 0 && (
+                  <div style={{ padding:'12px 14px', borderTop:`1px solid ${c.border}` }}>
+                    <input style={{ ...s.input, marginBottom:8, padding:'8px 12px', fontSize:12 }} placeholder="Nombre del cliente (opcional)" value={carritoCliente} onChange={e => setCarritoCliente(e.target.value)} />
+
+                    {/* Descuento */}
+                    <div style={{ display:'flex', gap:6, marginBottom:8 }}>
+                      <select style={{ ...s.input, marginBottom:0, flex:1, padding:'7px 8px', fontSize:12 }} value={carritoDescTipo} onChange={e => { setCarritoDescTipo(e.target.value); setCarritoDescValor('') }}>
+                        <option value="ninguno">Sin descuento</option>
+                        <option value="guaranies">Descuento Gs.</option>
+                        <option value="porcentaje">Descuento %</option>
+                      </select>
+                      {carritoDescTipo !== 'ninguno' && (
+                        <input style={{ ...s.input, marginBottom:0, width:90, padding:'7px 8px', fontSize:12 }} type="number" placeholder={carritoDescTipo==='porcentaje'?'%':'Gs.'} value={carritoDescValor} onChange={e => setCarritoDescValor(e.target.value)} />
+                      )}
+                    </div>
+
+                    <select style={{ ...s.input, marginBottom:8, padding:'7px 12px', fontSize:12 }} value={carritoMetodo} onChange={e => setCarritoMetodo(e.target.value)}>
+                      <option>Efectivo</option><option>Transferencia</option><option>Cuotas</option>
+                    </select>
+
+                    {carritoMetodo === 'Cuotas' && (
+                      <div style={{ marginBottom:8 }}>
+                        <input style={{ ...s.input, marginBottom:4, padding:'7px 12px', fontSize:12 }} type="number" min="2" placeholder="N° de cuotas" value={carritoCuotas} onChange={e => setCarritoCuotas(e.target.value)} />
+                        {Number(carritoCuotas) > 1 && calcularCarritoTotal() > 0 && (
+                          <div style={{ fontSize:11, color:'#FFD600', textAlign:'center' }}>
+                            Cada cuota: {formatGs(Math.ceil(calcularCarritoTotal() / Number(carritoCuotas)))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Totales */}
+                    <div style={{ background:c.card2, borderRadius:10, padding:'10px 12px', marginBottom:10 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:c.muted, marginBottom:3 }}>
+                        <span>Subtotal</span><span>{formatGs(calcularCarritoSubtotal())}</span>
+                      </div>
+                      {calcularCarritoDescuento() > 0 && (
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#FF4B6E', marginBottom:3 }}>
+                          <span>Descuento</span><span>-{formatGs(calcularCarritoDescuento())}</span>
+                        </div>
+                      )}
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:16, fontWeight:700, color:'#5BC4F5', borderTop:`1px solid ${c.border}`, paddingTop:6, marginTop:4 }}>
+                        <span>TOTAL</span><span>{formatGs(calcularCarritoTotal())}</span>
+                      </div>
+                    </div>
+
+                    <button style={{ ...s.btnYellow, width:'100%', justifyContent:'center', padding:'12px', fontSize:14 }} onClick={confirmarVentaCarrito}>
+                      ✅ Confirmar venta
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {/* ── VENTAS ── */}
-          {seccion==='ventas' && (
+          {/* HISTORIAL DE VENTAS */}
+          {seccion==='historial' && (
             <div>
               <div style={s.grid4}>
                 <StatCard label="Balance hoy" value={formatGs(balanceHoy)} color="#00D97E" emoji="📅" />
@@ -719,7 +908,7 @@ export default function Home() {
                     {ventas.length===0 && <tr><td colSpan={8} style={{ ...s.td, textAlign:'center', color:c.muted, padding:32 }}>Sin ventas</td></tr>}
                     {ventas.map((v: any) => (
                       <tr key={v.id}>
-                        <td style={{ ...s.td, fontWeight:500 }}>{v.nombre_producto||'—'}</td>
+                        <td style={{ ...s.td, fontWeight:500, maxWidth:200 }}>{v.nombre_producto||'—'}</td>
                         <td style={s.td}>{v.cliente_nombre||'—'}</td>
                         <td style={s.td}>{v.metodo_pago}</td>
                         <td style={{ ...s.td, color:'#00D97E', fontWeight:600 }}>{formatGs(v.total)}</td>
@@ -741,7 +930,37 @@ export default function Home() {
             </div>
           )}
 
-          {/* ── CUOTAS ── */}
+          {/* STOCK */}
+          {seccion==='stock' && (
+            <div>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:14 }}>
+                {listaCategorias.map(cat => (
+                  <button key={cat} onClick={() => setCategoriaFiltro(cat)} style={{ background:categoriaFiltro===cat?'#1A3AFF':c.input, color:categoriaFiltro===cat?'#fff':c.muted, border:`1px solid ${categoriaFiltro===cat?'#1A3AFF':c.border}`, borderRadius:50, padding:'5px 14px', fontSize:12, cursor:'pointer' }}>{cat}</button>
+                ))}
+              </div>
+              {categoriaFiltro==='Todas' && !busqueda ? (
+                Object.keys(productosAgrupados).length===0
+                  ? <div style={{ ...s.card, textAlign:'center', color:c.muted, padding:40 }}>Sin productos. ¡Agregá el primero!</div>
+                  : Object.entries(productosAgrupados).map(([cat, prods]: any) => (
+                    <div key={cat} style={s.card}>
+                      <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:12 }}>📁 {cat} ({prods.length})</div>
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:10 }}>
+                        {prods.map((p: any) => <ProductoCardStock key={p.id} p={p} />)}
+                      </div>
+                    </div>
+                  ))
+              ) : (
+                <div style={s.card}>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:10 }}>
+                    {productosFiltrados.map((p: any) => <ProductoCardStock key={p.id} p={p} />)}
+                    {productosFiltrados.length===0 && <div style={{ gridColumn:'1/-1', textAlign:'center', color:c.muted, padding:32 }}>No se encontraron productos</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* CUOTAS */}
           {seccion==='cuotas' && (
             <div>
               <div style={s.grid4}>
@@ -753,48 +972,43 @@ export default function Home() {
               {ventasConDeuda.length===0 ? (
                 <div style={{ ...s.card, textAlign:'center', padding:40 }}>
                   <div style={{ fontSize:40, marginBottom:12 }}>✅</div>
-                  <div style={{ fontSize:16, fontWeight:600, color:c.text, marginBottom:8 }}>¡Sin deudas pendientes!</div>
+                  <div style={{ fontSize:16, fontWeight:600, color:c.text }}>¡Sin deudas pendientes!</div>
                 </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:10 }}>⚠️ Clientes con saldo pendiente</div>
-                  {ventasConDeuda.map((v: any) => {
-                    const pagosDeEstaVenta = pagosCuotas.filter((p: any) => p.venta_id===v.id)
-                    const totalPagado = pagosDeEstaVenta.reduce((s: number, p: any) => s+(p.monto||0), 0)
-                    return (
-                      <div key={v.id} style={s.card}>
-                        <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
-                          <div style={{ fontSize:22, width:44, height:44, borderRadius:12, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,75,110,0.15)', flexShrink:0 }}>💳</div>
-                          <div style={{ flex:1 }}>
-                            <div style={{ fontWeight:600, fontSize:14, color:c.text }}>{v.cliente_nombre||'Cliente'}</div>
-                            <div style={{ fontSize:12, color:c.muted, marginTop:2 }}>{v.nombre_producto||'Producto'} · Total: {formatGs(v.total)}</div>
-                            <div style={{ marginTop:8, height:6, background:c.border, borderRadius:3, overflow:'hidden' }}>
-                              <div style={{ height:'100%', width:`${v.total>0?Math.min(100,Math.round((totalPagado/v.total)*100)):0}%`, background:'linear-gradient(90deg,#1A3AFF,#5BC4F5)', borderRadius:3 }} />
-                            </div>
-                            <div style={{ fontSize:11, color:c.muted, marginTop:4 }}>Pagado: {formatGs(totalPagado)} · Saldo: {formatGs(v.saldo_pendiente||0)}</div>
-                            {pagosDeEstaVenta.length > 0 && (
-                              <div style={{ marginTop:10, background:c.card2, borderRadius:10, padding:10 }}>
-                                <div style={{ fontSize:11, color:c.muted, marginBottom:6, textTransform:'uppercase', letterSpacing:'.5px' }}>Historial de pagos</div>
-                                {pagosDeEstaVenta.map((p: any) => (
-                                  <div key={p.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'4px 0', borderBottom:`1px solid ${c.border}` }}>
-                                    <span style={{ color:c.muted }}>{formatFecha(p.fecha)} · {p.empleado}</span>
-                                    <span style={{ color:'#00D97E', fontWeight:600 }}>+{formatGs(p.monto)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ textAlign:'right', flexShrink:0 }}>
-                            <div style={{ fontSize:11, color:c.muted, marginBottom:4 }}>Saldo restante</div>
-                            <div style={{ fontSize:18, fontWeight:700, color:'#FF4B6E', marginBottom:10 }}>{formatGs(v.saldo_pendiente||0)}</div>
-                            <button style={s.btnGreen} onClick={() => { setVentaSeleccionada(v); setTipoModal('pago'); setShowModal(true) }}>💰 Registrar pago</button>
-                          </div>
+              ) : ventasConDeuda.map((v: any) => {
+                const pagosDeEstaVenta = pagosCuotas.filter((p: any) => p.venta_id===v.id)
+                const totalPagado = pagosDeEstaVenta.reduce((s: number, p: any) => s+(p.monto||0), 0)
+                return (
+                  <div key={v.id} style={s.card}>
+                    <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
+                      <div style={{ fontSize:22, width:44, height:44, borderRadius:12, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,75,110,0.15)', flexShrink:0 }}>💳</div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontWeight:600, fontSize:14, color:c.text }}>{v.cliente_nombre||'Cliente'}</div>
+                        <div style={{ fontSize:12, color:c.muted, marginTop:2 }}>{v.nombre_producto||'Producto'} · Total: {formatGs(v.total)}</div>
+                        <div style={{ marginTop:8, height:6, background:c.border, borderRadius:3, overflow:'hidden' }}>
+                          <div style={{ height:'100%', width:`${v.total>0?Math.min(100,Math.round((totalPagado/v.total)*100)):0}%`, background:'linear-gradient(90deg,#1A3AFF,#5BC4F5)', borderRadius:3 }} />
                         </div>
+                        <div style={{ fontSize:11, color:c.muted, marginTop:4 }}>Pagado: {formatGs(totalPagado)} · Saldo: {formatGs(v.saldo_pendiente||0)}</div>
+                        {pagosDeEstaVenta.length > 0 && (
+                          <div style={{ marginTop:10, background:c.card2, borderRadius:10, padding:10 }}>
+                            <div style={{ fontSize:11, color:c.muted, marginBottom:6, textTransform:'uppercase', letterSpacing:'.5px' }}>Historial de pagos</div>
+                            {pagosDeEstaVenta.map((p: any) => (
+                              <div key={p.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'4px 0', borderBottom:`1px solid ${c.border}` }}>
+                                <span style={{ color:c.muted }}>{formatFecha(p.fecha)} · {p.empleado}</span>
+                                <span style={{ color:'#00D97E', fontWeight:600 }}>+{formatGs(p.monto)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )
-                  })}
-                </div>
-              )}
+                      <div style={{ textAlign:'right', flexShrink:0 }}>
+                        <div style={{ fontSize:11, color:c.muted, marginBottom:4 }}>Saldo restante</div>
+                        <div style={{ fontSize:18, fontWeight:700, color:'#FF4B6E', marginBottom:10 }}>{formatGs(v.saldo_pendiente||0)}</div>
+                        <button style={s.btnGreen} onClick={() => { setVentaSeleccionada(v); setTipoModal('pago'); setShowModal(true) }}>💰 Registrar pago</button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
               {ventas.filter((v: any) => v.metodo_pago==='Cuotas'&&v.estado_pago==='Pagado').length > 0 && (
                 <div style={s.card}>
                   <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:12 }}>✅ Completamente pagados</div>
@@ -816,7 +1030,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* ── TÉCNICO ── */}
+          {/* TÉCNICO */}
           {seccion==='tecnico' && (
             <div>
               {reparaciones.map((r: any) => (
@@ -849,7 +1063,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* ── CLIENTES ── */}
+          {/* CLIENTES */}
           {seccion==='clientes' && (
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:12 }}>
               {clientes.length===0 && <div style={{ ...s.card, textAlign:'center', color:c.muted, padding:40 }}>Sin clientes</div>}
@@ -870,46 +1084,46 @@ export default function Home() {
             </div>
           )}
 
-          {/* ── GASTOS ── */}
+          {/* GASTOS E INVERSIONES */}
           {seccion==='gastos' && (
             <div>
               <div style={s.grid4}>
-                <StatCard label={`Gastos ${mesActual}`} value={formatGs(totalGastosMes)} color="#FF4B6E" emoji="💸" />
+                <StatCard label="Gastos operativos" value={formatGs(totalGastosMes)} color="#FF4B6E" emoji="💸" />
+                <StatCard label="Inversiones mes" value={formatGs(totalInversionesMes)} color="#FFD600" emoji="💼" />
                 <StatCard label="Ingresos mes" value={formatGs(balanceMes)} color="#00D97E" emoji="📈" />
                 <StatCard label="Ganancia neta" value={formatGs(gananciaNeta)} color={gananciaNeta>=0?'#00D97E':'#FF4B6E'} emoji="💎" />
-                <StatCard label="Total registros" value={gastos.length} color="#FFD600" emoji="📋" />
               </div>
-              <div style={s.card}>
-                <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:12 }}>📊 Gastos del mes por categoría</div>
-                {CATEGORIAS_GASTOS.map(cat => {
-                  const total = gastosMes.filter((g: any) => g.categoria===cat).reduce((s: number, g: any) => s+(g.monto||0), 0)
-                  if (total===0) return null
-                  const pct = totalGastosMes>0 ? Math.round((total/totalGastosMes)*100) : 0
-                  return (
-                    <div key={cat} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
-                      <span style={{ fontSize:12, color:c.text, width:100 }}>{cat}</span>
-                      <div style={{ flex:1, height:8, background:c.border, borderRadius:4, overflow:'hidden' }}>
-                        <div style={{ height:'100%', width:`${pct}%`, background:'linear-gradient(90deg,#FF4B6E,#FF8C66)', borderRadius:4 }} />
-                      </div>
-                      <span style={{ fontSize:12, fontWeight:600, color:'#FF4B6E', width:120, textAlign:'right' }}>{formatGs(total)}</span>
-                      <span style={{ fontSize:11, color:c.muted, width:36, textAlign:'right' }}>{pct}%</span>
-                    </div>
-                  )
-                })}
-                {totalGastosMes===0 && <p style={{ color:c.muted, fontSize:12 }}>Sin gastos registrados este mes</p>}
+
+              {/* Tabs gastos vs inversiones */}
+              <div style={{ display:'flex', gap:0, marginBottom:14, background:c.card2, borderRadius:12, padding:4, width:'fit-content' }}>
+                {['todos','Gasto','Inversión'].map(t => (
+                  <button key={t} onClick={() => setCategoriaFiltro(t)}
+                    style={{ padding:'6px 16px', borderRadius:9, border:'none', cursor:'pointer', fontSize:13,
+                      background: categoriaFiltro===t ? '#1A3AFF' : 'transparent',
+                      color: categoriaFiltro===t ? '#fff' : c.muted, fontWeight: categoriaFiltro===t ? 600 : 400 }}>
+                    {t==='todos'?'Todos':t==='Gasto'?'💸 Gastos':'💼 Inversiones'}
+                  </button>
+                ))}
               </div>
+
               <div style={s.card}>
-                <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:12 }}>📋 Todos los gastos</div>
                 <table style={s.table}>
-                  <thead><tr>{['Fecha','Descripción','Categoría','Monto','Acción'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+                  <thead><tr>{['Fecha','Descripción','Categoría','Tipo','Monto','Acción'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {gastos.length===0 && <tr><td colSpan={5} style={{ ...s.td, textAlign:'center', color:c.muted, padding:32 }}>Sin gastos registrados</td></tr>}
-                    {gastos.map((g: any) => (
+                    {gastos.filter(g => categoriaFiltro==='todos' || g.tipo===categoriaFiltro).length===0 && (
+                      <tr><td colSpan={6} style={{ ...s.td, textAlign:'center', color:c.muted, padding:32 }}>Sin registros</td></tr>
+                    )}
+                    {gastos.filter(g => categoriaFiltro==='todos' || g.tipo===categoriaFiltro).map((g: any) => (
                       <tr key={g.id}>
                         <td style={{ ...s.td, fontSize:11, color:c.muted }}>{formatFecha(g.fecha)}</td>
                         <td style={{ ...s.td, fontWeight:500 }}>{g.descripcion}</td>
                         <td style={s.td}><span style={{ background:'rgba(255,75,110,0.1)', color:'#FF4B6E', padding:'2px 8px', borderRadius:50, fontSize:11 }}>{g.categoria}</span></td>
-                        <td style={{ ...s.td, color:'#FF4B6E', fontWeight:600 }}>{formatGs(g.monto)}</td>
+                        <td style={s.td}>
+                          <span style={{ background:g.tipo==='Inversión'?'rgba(255,214,0,0.15)':'rgba(255,75,110,0.1)', color:g.tipo==='Inversión'?'#FFD600':'#FF4B6E', padding:'2px 8px', borderRadius:50, fontSize:11 }}>
+                            {g.tipo==='Inversión'?'💼 Inversión':'💸 Gasto'}
+                          </span>
+                        </td>
+                        <td style={{ ...s.td, color:g.tipo==='Inversión'?'#FFD600':'#FF4B6E', fontWeight:600 }}>{formatGs(g.monto)}</td>
                         <td style={s.td}><button style={s.btnRed} onClick={() => eliminarGasto(g.id)}>🗑</button></td>
                       </tr>
                     ))}
@@ -919,16 +1133,14 @@ export default function Home() {
             </div>
           )}
 
-          {/* ── CAJA ── */}
+          {/* CAJA */}
           {seccion==='caja' && (
             <div>
               <div style={{ ...s.card, background:estadoCaja==='abierta'?'rgba(0,217,126,0.07)':estadoCaja==='cerrada'?'rgba(255,75,110,0.07)':'rgba(255,214,0,0.07)', border:`1px solid ${estadoCaja==='abierta'?'rgba(0,217,126,0.3)':estadoCaja==='cerrada'?'rgba(255,75,110,0.3)':'rgba(255,214,0,0.3)'}` }}>
                 <div style={{ display:'flex', alignItems:'center', gap:14 }}>
                   <div style={{ fontSize:36 }}>{estadoCaja==='abierta'?'🟢':estadoCaja==='cerrada'?'🔴':'🟡'}</div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:16, fontWeight:700, color:c.text }}>
-                      {estadoCaja==='abierta'?'Caja abierta':estadoCaja==='cerrada'?'Caja cerrada':'Sin movimiento hoy'}
-                    </div>
+                    <div style={{ fontSize:16, fontWeight:700, color:c.text }}>{estadoCaja==='abierta'?'Caja abierta':estadoCaja==='cerrada'?'Caja cerrada':'Sin movimiento hoy'}</div>
                     {cajaAbierta && <div style={{ fontSize:12, color:c.muted, marginTop:2 }}>Apertura por: {(cajaAbierta as any).empleado} a las {formatHora((cajaAbierta as any).created_at)}</div>}
                     {cajaCerrada && <div style={{ fontSize:12, color:c.muted, marginTop:2 }}>Cierre por: {(cajaCerrada as any).empleado} a las {formatHora((cajaCerrada as any).created_at)}</div>}
                   </div>
@@ -949,7 +1161,7 @@ export default function Home() {
                 <table style={s.table}>
                   <thead><tr>{['Fecha','Tipo','Empleado','Monto inicial','Hora','Obs'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {cajaRegistros.length===0 && <tr><td colSpan={6} style={{ ...s.td, textAlign:'center', color:c.muted, padding:32 }}>Sin registros de caja</td></tr>}
+                    {cajaRegistros.length===0 && <tr><td colSpan={6} style={{ ...s.td, textAlign:'center', color:c.muted, padding:32 }}>Sin registros</td></tr>}
                     {cajaRegistros.map((cj: any) => (
                       <tr key={cj.id}>
                         <td style={{ ...s.td, fontSize:11, color:c.muted }}>{formatFecha(cj.fecha)}</td>
@@ -966,7 +1178,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* ── BALANCE ── */}
+          {/* BALANCE */}
           {seccion==='balance' && (
             <div>
               <div style={{ ...s.card, display:'flex', alignItems:'center', gap:16, flexWrap:'wrap', marginBottom:16 }}>
@@ -985,83 +1197,62 @@ export default function Home() {
             </div>
           )}
 
-          {/* ── CATEGORÍAS (admin completo) ── */}
+          {/* CATEGORÍAS */}
           {seccion==='categorias' && (
             <div>
-              {/* Crear nueva */}
               <div style={s.card}>
                 <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:14 }}>➕ Crear nueva categoría</div>
                 <div style={{ display:'flex', gap:10 }}>
-                  <input style={{ ...s.input, marginBottom:0, flex:1 }} placeholder="Ej: Fundas, Cables, Smart TV..." value={nuevaCategoria} onChange={e => setNuevaCategoria(e.target.value)} onKeyDown={e => e.key==='Enter' && agregarCategoria()} />
+                  <input style={{ ...s.input, marginBottom:0, flex:1 }} placeholder="Ej: Fundas, Cables..." value={nuevaCategoria} onChange={e => setNuevaCategoria(e.target.value)} onKeyDown={e => e.key==='Enter' && agregarCategoria()} />
                   <button style={s.btnYellow} onClick={agregarCategoria}>Agregar</button>
                 </div>
               </div>
-
-              {/* Lista de categorías con admin completo */}
-              {categorias.length===0 && <div style={{ ...s.card, textAlign:'center', color:c.muted, padding:40 }}>Sin categorías todavía</div>}
               {categorias.map((cat: any) => {
                 const prodsEnCat = productos.filter(p => p.categoria===cat.nombre)
                 const prodsOtrasCats = productos.filter(p => p.categoria!==cat.nombre)
                 const estaEditando = editandoCategoria===cat.id
                 return (
                   <div key={cat.id} style={s.card}>
-                    {/* Encabezado de categoría */}
                     <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
                       {estaEditando ? (
                         <>
-                          <input style={{ ...s.input, marginBottom:0, flex:1 }} value={nombreCatEdit} onChange={e => setNombreCatEdit(e.target.value)} onKeyDown={e => e.key==='Enter' && guardarEditCategoria(cat.id)} autoFocus />
+                          <input style={{ ...s.input, marginBottom:0, flex:1 }} value={nombreCatEdit} onChange={e => setNombreCatEdit(e.target.value)} autoFocus />
                           <button style={s.btnYellow} onClick={() => guardarEditCategoria(cat.id)}>Guardar</button>
                           <button style={s.btnGray} onClick={() => { setEditandoCategoria(null); setNombreCatEdit('') }}>Cancelar</button>
                         </>
                       ) : (
                         <>
-                          <span style={{ fontSize:14, fontWeight:600, color:c.text, flex:1 }}>📁 {cat.nombre} <span style={{ fontSize:12, color:c.muted, fontWeight:400 }}>({prodsEnCat.length} productos)</span></span>
-                          <button style={s.btnBlue} onClick={() => { setEditandoCategoria(cat.id); setNombreCatEdit(cat.nombre) }}>✏️ Editar nombre</button>
+                          <span style={{ fontSize:14, fontWeight:600, color:c.text, flex:1 }}>📁 {cat.nombre} <span style={{ fontSize:12, color:c.muted, fontWeight:400 }}>({prodsEnCat.length})</span></span>
+                          <button style={s.btnBlue} onClick={() => { setEditandoCategoria(cat.id); setNombreCatEdit(cat.nombre) }}>✏️ Editar</button>
                           <button style={s.btnRed} onClick={() => eliminarCategoria(cat.id)}>🗑</button>
                         </>
                       )}
                     </div>
-
-                    {/* Productos en esta categoría */}
-                    {prodsEnCat.length > 0 ? (
+                    {prodsEnCat.length > 0 && (
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:8, marginBottom:prodsOtrasCats.length>0?12:0 }}>
                         {prodsEnCat.map((p: any) => (
                           <div key={p.id} style={{ background:c.card2, border:`1px solid ${c.border}`, borderRadius:10, padding:10, display:'flex', alignItems:'center', gap:8 }}>
-                            {p.foto_url && <img src={p.foto_url} alt="" style={{ width:36, height:36, objectFit:'contain', borderRadius:6, background:c.card, flexShrink:0 }} />}
+                            {p.foto_url && <img src={p.foto_url} alt="" style={{ width:32, height:32, objectFit:'contain', borderRadius:6, background:c.card, flexShrink:0 }} />}
                             <div style={{ flex:1, minWidth:0 }}>
                               <div style={{ fontSize:12, fontWeight:500, color:c.text, marginBottom:2 }}>{p.nombre}</div>
                               <div style={{ fontSize:11, color:c.muted }}>{formatGs(p.precio_venta)}</div>
                             </div>
-                            {/* Mover a otra categoría */}
-                            <select
-                              value={cat.nombre}
-                              onChange={e => moverProductoCategoria(p.id, e.target.value)}
-                              style={{ background:c.input, border:`1px solid ${c.border}`, borderRadius:6, padding:'3px 6px', color:c.muted, fontSize:10, cursor:'pointer', maxWidth:90 }}
-                              title="Mover a categoría">
+                            <select value={cat.nombre} onChange={e => moverProductoCategoria(p.id, e.target.value)}
+                              style={{ background:c.input, border:`1px solid ${c.border}`, borderRadius:6, padding:'3px 6px', color:c.muted, fontSize:10, cursor:'pointer', maxWidth:90 }}>
                               <option value={cat.nombre}>📁 {cat.nombre}</option>
-                              {categorias.filter((cc: any) => cc.id!==cat.id).map((cc: any) => (
-                                <option key={cc.id} value={cc.nombre}>→ {cc.nombre}</option>
-                              ))}
+                              {categorias.filter((cc: any) => cc.id!==cat.id).map((cc: any) => <option key={cc.id} value={cc.nombre}>→ {cc.nombre}</option>)}
                             </select>
                           </div>
                         ))}
                       </div>
-                    ) : (
-                      <p style={{ fontSize:12, color:c.muted, marginBottom:8 }}>Sin productos en esta categoría.</p>
                     )}
-
-                    {/* Agregar productos existentes desde otras categorías */}
                     {prodsOtrasCats.length > 0 && (
                       <div style={{ borderTop:`1px solid ${c.border}`, paddingTop:10 }}>
-                        <div style={{ fontSize:11, color:c.muted, marginBottom:8 }}>Agregar producto existente a esta categoría:</div>
-                        <select
-                          defaultValue=""
-                          onChange={e => { if (e.target.value) { moverProductoCategoria(e.target.value, cat.nombre); e.target.value='' } }}
+                        <div style={{ fontSize:11, color:c.muted, marginBottom:8 }}>Mover producto a esta categoría:</div>
+                        <select defaultValue="" onChange={e => { if (e.target.value) { moverProductoCategoria(e.target.value, cat.nombre); (e.target as any).value='' } }}
                           style={{ ...s.input, marginBottom:0, maxWidth:320 }}>
                           <option value="">Seleccionar producto...</option>
-                          {prodsOtrasCats.map((p: any) => (
-                            <option key={p.id} value={p.id}>{p.nombre} (ahora en: {p.categoria||'sin categoría'})</option>
-                          ))}
+                          {prodsOtrasCats.map((p: any) => <option key={p.id} value={p.id}>{p.nombre} (en: {p.categoria||'sin categoría'})</option>)}
                         </select>
                       </div>
                     )}
@@ -1074,17 +1265,16 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── MODALES ── */}
+      {/* MODALES */}
       {showModal && (
         <div style={s.overlay} onClick={() => setShowModal(false)}>
           <div style={s.modal} onClick={e => e.stopPropagation()}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
               <h2 style={{ fontWeight:700, fontSize:16, color:c.text }}>
                 {tipoModal==='producto' && (productoEditando ? '✏️ Editar producto' : '📦 Nuevo producto')}
-                {tipoModal==='venta' && '💰 Nueva venta'}
                 {tipoModal==='reparacion' && '🔧 Registrar equipo'}
                 {tipoModal==='cliente' && '👥 Nuevo cliente'}
-                {tipoModal==='gasto' && '💸 Registrar gasto'}
+                {tipoModal==='gasto' && '💸 Registrar gasto / inversión'}
                 {tipoModal==='pago' && '💳 Registrar pago'}
                 {tipoModal==='caja' && '🏦 Movimiento de caja'}
               </h2>
@@ -1093,7 +1283,7 @@ export default function Home() {
 
             {tipoModal==='producto' && (
               <div>
-                <Label text="Categoría / Carpeta" />
+                <Label text="Categoría" />
                 <select style={s.input} value={formProducto.categoria} onChange={e => setFormProducto({ ...formProducto, categoria:e.target.value })}>
                   {categorias.map((cat: any) => <option key={cat.id}>{cat.nombre}</option>)}
                 </select>
@@ -1105,8 +1295,7 @@ export default function Home() {
                 {fotoPreview && (
                   <div style={{ position:'relative', marginBottom:10 }}>
                     <img src={fotoPreview} alt="" style={{ width:'100%', height:120, objectFit:'contain', borderRadius:10, background:c.card2 }} />
-                    <button style={{ ...s.btnRed, position:'absolute', top:6, right:6, padding:'2px 8px', fontSize:11 }}
-                      onClick={() => { setFotoPreview(''); setFormProducto(f => ({ ...f, foto_url:'' })) }}>✕ Quitar foto</button>
+                    <button style={{ ...s.btnRed, position:'absolute', top:6, right:6, padding:'2px 8px', fontSize:11 }} onClick={() => { setFotoPreview(''); setFormProducto(f => ({ ...f, foto_url:'' })) }}>✕</button>
                   </div>
                 )}
                 <Label text="Precio de compra (Gs)" />
@@ -1128,83 +1317,25 @@ export default function Home() {
               </div>
             )}
 
-            {tipoModal==='venta' && (
-              <div>
-                {productoVenta && (
-                  <div style={{ background:'rgba(26,58,255,0.08)', border:'1px solid rgba(26,58,255,0.2)', borderRadius:10, padding:'10px 14px', marginBottom:14, display:'flex', alignItems:'center', gap:10 }}>
-                    {(productoVenta as any).foto_url && <img src={(productoVenta as any).foto_url} alt="" style={{ width:40, height:40, objectFit:'contain', borderRadius:8, background:c.card }} />}
-                    <div>
-                      <div style={{ fontSize:13, fontWeight:600, color:c.text }}>{(productoVenta as any).nombre}</div>
-                      <div style={{ fontSize:11, color:c.muted }}>Precio: {formatGs((productoVenta as any).precio_venta)} · Stock: {(productoVenta as any).stock_actual}</div>
-                    </div>
-                    <button style={{ ...s.btnRed, marginLeft:'auto', padding:'3px 8px', fontSize:11 }} onClick={() => { setProductoVenta(null); setFormVenta({ ...formVenta, nombre_producto:'', precio_unitario:'' }) }}>× Quitar</button>
-                  </div>
-                )}
-                <Label text="Nombre del producto" />
-                <input style={s.input} placeholder="Ej: Samsung A15, Case iPhone..." value={formVenta.nombre_producto} onChange={e => setFormVenta({ ...formVenta, nombre_producto:e.target.value })} />
-                <Label text="Nombre del cliente" />
-                <input style={s.input} placeholder="Nombre del cliente" value={formVenta.cliente_nombre} onChange={e => setFormVenta({ ...formVenta, cliente_nombre:e.target.value })} />
-                <Label text="Precio unitario (Gs)" />
-                <input style={s.input} type="number" placeholder="0" value={formVenta.precio_unitario} onChange={e => setFormVenta({ ...formVenta, precio_unitario:e.target.value })} />
-                <Label text="Cantidad" />
-                <input style={s.input} type="number" value={formVenta.cantidad} onChange={e => setFormVenta({ ...formVenta, cantidad:e.target.value })} />
-                <Label text="Descuento" />
-                <div style={{ display:'flex', gap:8, marginBottom:10 }}>
-                  <select style={{ ...s.input, marginBottom:0, width:160 }} value={formVenta.tipoDescuento} onChange={e => setFormVenta({ ...formVenta, tipoDescuento:e.target.value, descuento:'' })}>
-                    <option value="ninguno">Sin descuento</option>
-                    <option value="guaranies">En Guaraníes</option>
-                    <option value="porcentaje">En porcentaje %</option>
-                  </select>
-                  {formVenta.tipoDescuento!=='ninguno' && <input style={{ ...s.input, marginBottom:0, flex:1 }} type="number" placeholder={formVenta.tipoDescuento==='porcentaje'?'Ej: 10':'Ej: 5000'} value={formVenta.descuento} onChange={e => setFormVenta({ ...formVenta, descuento:e.target.value })} />}
-                </div>
-                {subtotalVenta > 0 && (
-                  <div style={{ background:'rgba(26,58,255,0.08)', border:'1px solid rgba(26,58,255,0.2)', borderRadius:12, padding:14, marginBottom:10 }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:c.muted, marginBottom:4 }}><span>Subtotal</span><span>{formatGs(subtotalVenta)}</span></div>
-                    {descuentoGs > 0 && <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#FF4B6E', marginBottom:4 }}><span>Descuento{formVenta.tipoDescuento==='porcentaje'?` (${formVenta.descuento}%)`:''}</span><span>-{formatGs(descuentoGs)}</span></div>}
-                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:16, fontWeight:700, color:'#5BC4F5', borderTop:`1px solid ${c.border}`, paddingTop:8, marginTop:4 }}><span>Total</span><span>{formatGs(totalVenta)}</span></div>
-                  </div>
-                )}
-                <Label text="Método de pago" />
-                <select style={s.input} value={formVenta.metodo_pago} onChange={e => setFormVenta({ ...formVenta, metodo_pago:e.target.value })}>
-                  <option>Efectivo</option><option>Transferencia</option><option>Cuotas</option>
-                </select>
-                {formVenta.metodo_pago==='Cuotas' && (
-                  <div>
-                    <div style={{ background:'rgba(255,214,0,0.06)', border:'1px solid rgba(255,214,0,0.2)', borderRadius:10, padding:'10px 14px', marginBottom:10, fontSize:12, color:c.muted }}>
-                      💡 El cliente puede pagar cualquier monto en cualquier momento. El sistema lleva el saldo automáticamente.
-                    </div>
-                    <Label text="Número de cuotas (estimado)" />
-                    <input style={s.input} type="number" min="2" max="24" placeholder="Ej: 3" value={formVenta.cuotas_total} onChange={e => setFormVenta({ ...formVenta, cuotas_total:e.target.value })} />
-                    {Number(formVenta.cuotas_total) > 1 && totalVenta > 0 && (
-                      <div style={{ background:'rgba(255,214,0,0.08)', border:'1px solid rgba(255,214,0,0.2)', borderRadius:10, padding:'10px 14px', marginBottom:10, fontSize:13, color:'#FFD600', fontWeight:600 }}>
-                        💰 Referencia por cuota: {formatGs(Math.ceil(totalVenta / Number(formVenta.cuotas_total)))}
-                      </div>
-                    )}
-                  </div>
-                )}
-                <button style={{ ...s.btnYellow, width:'100%', marginTop:8 }} onClick={guardarVenta}>Registrar venta</button>
-              </div>
-            )}
-
             {tipoModal==='pago' && ventaSeleccionada && (
               <div>
                 <div style={{ background:'rgba(26,58,255,0.08)', border:'1px solid rgba(26,58,255,0.2)', borderRadius:12, padding:14, marginBottom:16 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:4 }}>{(ventaSeleccionada as any).cliente_nombre||'Cliente'}</div>
-                  <div style={{ fontSize:12, color:c.muted, marginBottom:8 }}>{(ventaSeleccionada as any).nombre_producto||'Producto'}</div>
+                  <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:4 }}>{ventaSeleccionada.cliente_nombre||'Cliente'}</div>
+                  <div style={{ fontSize:12, color:c.muted, marginBottom:8 }}>{ventaSeleccionada.nombre_producto||'Producto'}</div>
                   <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}>
-                    <span style={{ color:c.muted }}>Total de la venta</span><span style={{ fontWeight:600 }}>{formatGs((ventaSeleccionada as any).total)}</span>
+                    <span style={{ color:c.muted }}>Total</span><span style={{ fontWeight:600 }}>{formatGs(ventaSeleccionada.total)}</span>
                   </div>
                   <div style={{ display:'flex', justifyContent:'space-between', fontSize:15, marginTop:4 }}>
-                    <span style={{ color:c.muted }}>Saldo pendiente</span><span style={{ fontWeight:700, color:'#FF4B6E' }}>{formatGs((ventaSeleccionada as any).saldo_pendiente||0)}</span>
+                    <span style={{ color:c.muted }}>Saldo pendiente</span><span style={{ fontWeight:700, color:'#FF4B6E' }}>{formatGs(ventaSeleccionada.saldo_pendiente||0)}</span>
                   </div>
                 </div>
                 <Label text="Monto que paga ahora (Gs)" />
-                <input style={s.input} type="number" placeholder={`Máx: ${(ventaSeleccionada as any).saldo_pendiente}`} value={formPago.monto} onChange={e => setFormPago({ ...formPago, monto:e.target.value })} />
+                <input style={s.input} type="number" placeholder={`Máx: ${ventaSeleccionada.saldo_pendiente}`} value={formPago.monto} onChange={e => setFormPago({ ...formPago, monto:e.target.value })} />
                 {formPago.monto && Number(formPago.monto) > 0 && (
                   <div style={{ background:'rgba(0,217,126,0.08)', border:'1px solid rgba(0,217,126,0.2)', borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
                     <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}>
-                      <span style={{ color:c.muted }}>Nuevo saldo después del pago</span>
-                      <span style={{ fontWeight:700, color:'#00D97E' }}>{formatGs(Math.max(0, ((ventaSeleccionada as any).saldo_pendiente||0) - Number(formPago.monto)))}</span>
+                      <span style={{ color:c.muted }}>Nuevo saldo</span>
+                      <span style={{ fontWeight:700, color:'#00D97E' }}>{formatGs(Math.max(0, (ventaSeleccionada.saldo_pendiente||0) - Number(formPago.monto)))}</span>
                     </div>
                   </div>
                 )}
@@ -1213,7 +1344,7 @@ export default function Home() {
                   {EMPLEADOS.map(e => <option key={e}>{e}</option>)}
                 </select>
                 <Label text="Observaciones (opcional)" />
-                <input style={s.input} placeholder="Ej: Pago parcial, cuota de mayo..." value={formPago.observaciones} onChange={e => setFormPago({ ...formPago, observaciones:e.target.value })} />
+                <input style={s.input} placeholder="Notas..." value={formPago.observaciones} onChange={e => setFormPago({ ...formPago, observaciones:e.target.value })} />
                 <button style={{ ...s.btnYellow, width:'100%', marginTop:8 }} onClick={registrarPagoParcial}>Registrar pago</button>
               </div>
             )}
@@ -1222,7 +1353,7 @@ export default function Home() {
               <div>
                 <Label text="Nombre del cliente *" /><input style={s.input} placeholder="Nombre completo" value={formReparacion.cliente_nombre} onChange={e => setFormReparacion({ ...formReparacion, cliente_nombre:e.target.value })} />
                 <Label text="Teléfono / WhatsApp *" /><input style={s.input} placeholder="09XX XXX XXX" value={formReparacion.cliente_telefono} onChange={e => setFormReparacion({ ...formReparacion, cliente_telefono:e.target.value })} />
-                <Label text="Dirección (opcional)" /><input style={s.input} placeholder="Barrio, calle, referencia..." value={formReparacion.cliente_direccion} onChange={e => setFormReparacion({ ...formReparacion, cliente_direccion:e.target.value })} />
+                <Label text="Dirección (opcional)" /><input style={s.input} placeholder="Barrio, calle..." value={formReparacion.cliente_direccion} onChange={e => setFormReparacion({ ...formReparacion, cliente_direccion:e.target.value })} />
                 <Label text="Modelo del celular *" /><input style={s.input} placeholder="Ej: iPhone 12, Samsung A32..." value={formReparacion.modelo_celular} onChange={e => setFormReparacion({ ...formReparacion, modelo_celular:e.target.value })} />
                 <Label text="Problema reportado *" /><input style={s.input} placeholder="Describí el problema..." value={formReparacion.problema_reportado} onChange={e => setFormReparacion({ ...formReparacion, problema_reportado:e.target.value })} />
                 <Label text="Garantía" />
@@ -1263,14 +1394,29 @@ export default function Home() {
 
             {tipoModal==='gasto' && (
               <div>
-                <Label text="Descripción del gasto" /><input style={s.input} placeholder="Ej: Compra de repuestos, pago de luz..." value={formGasto.descripcion} onChange={e => setFormGasto({ ...formGasto, descripcion:e.target.value })} />
+                {/* Selector Gasto vs Inversión */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
+                  {[
+                    { tipo:'Gasto', label:'💸 Gasto', desc:'Sale y no vuelve', color:'rgba(255,75,110,0.15)', border:'rgba(255,75,110,0.4)', text:'#FF4B6E' },
+                    { tipo:'Inversión', label:'💼 Inversión', desc:'Se recupera con ventas', color:'rgba(255,214,0,0.15)', border:'rgba(255,214,0,0.4)', text:'#FFD600' },
+                  ].map(opt => (
+                    <div key={opt.tipo} onClick={() => setFormGasto({ ...formGasto, tipo:opt.tipo })}
+                      style={{ background:formGasto.tipo===opt.tipo?opt.color:'transparent', border:`2px solid ${formGasto.tipo===opt.tipo?opt.border:c.border}`, borderRadius:12, padding:'12px', textAlign:'center', cursor:'pointer' }}>
+                      <div style={{ fontSize:14, fontWeight:600, color:formGasto.tipo===opt.tipo?opt.text:c.muted }}>{opt.label}</div>
+                      <div style={{ fontSize:10, color:c.muted, marginTop:2 }}>{opt.desc}</div>
+                    </div>
+                  ))}
+                </div>
+                <Label text="Descripción" /><input style={s.input} placeholder={formGasto.tipo==='Inversión'?'Ej: Compra de stock, repuestos...':'Ej: Pago de luz, alquiler...'} value={formGasto.descripcion} onChange={e => setFormGasto({ ...formGasto, descripcion:e.target.value })} />
                 <Label text="Categoría" />
                 <select style={s.input} value={formGasto.categoria} onChange={e => setFormGasto({ ...formGasto, categoria:e.target.value })}>
                   {CATEGORIAS_GASTOS.map(cat => <option key={cat}>{cat}</option>)}
                 </select>
                 <Label text="Monto (Gs)" /><input style={s.input} type="number" placeholder="0" value={formGasto.monto} onChange={e => setFormGasto({ ...formGasto, monto:e.target.value })} />
                 <Label text="Fecha" /><input style={s.input} type="date" value={formGasto.fecha} onChange={e => setFormGasto({ ...formGasto, fecha:e.target.value })} />
-                <button style={{ ...s.btnYellow, width:'100%', marginTop:8 }} onClick={guardarGasto}>Guardar gasto</button>
+                <button style={{ ...s.btnYellow, width:'100%', marginTop:8 }} onClick={guardarGasto}>
+                  Guardar {formGasto.tipo}
+                </button>
               </div>
             )}
 
@@ -1279,8 +1425,8 @@ export default function Home() {
                 <Label text="Tipo de movimiento" />
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
                   {[
-                    { tipo:'apertura', label:'🟢 Apertura de caja', color:'rgba(0,217,126,0.15)', border:'rgba(0,217,126,0.4)', text:'#00D97E' },
-                    { tipo:'cierre', label:'🔴 Cierre de caja', color:'rgba(255,75,110,0.15)', border:'rgba(255,75,110,0.4)', text:'#FF4B6E' },
+                    { tipo:'apertura', label:'🟢 Apertura', color:'rgba(0,217,126,0.15)', border:'rgba(0,217,126,0.4)', text:'#00D97E' },
+                    { tipo:'cierre', label:'🔴 Cierre', color:'rgba(255,75,110,0.15)', border:'rgba(255,75,110,0.4)', text:'#FF4B6E' },
                   ].map(opt => (
                     <div key={opt.tipo} onClick={() => setFormCaja({ ...formCaja, tipo:opt.tipo })}
                       style={{ background:formCaja.tipo===opt.tipo?opt.color:'transparent', border:`2px solid ${formCaja.tipo===opt.tipo?opt.border:c.border}`, borderRadius:12, padding:12, textAlign:'center', cursor:'pointer', fontSize:13, fontWeight:formCaja.tipo===opt.tipo?600:400, color:formCaja.tipo===opt.tipo?opt.text:c.muted }}>
@@ -1293,21 +1439,16 @@ export default function Home() {
                   {EMPLEADOS.map(e => <option key={e}>{e}</option>)}
                 </select>
                 {formCaja.tipo==='apertura' && (
-                  <>
-                    <Label text="Monto inicial en caja (Gs)" />
-                    <input style={s.input} type="number" placeholder="0" value={formCaja.monto_inicial} onChange={e => setFormCaja({ ...formCaja, monto_inicial:e.target.value })} />
-                  </>
+                  <><Label text="Monto inicial en caja (Gs)" /><input style={s.input} type="number" placeholder="0" value={formCaja.monto_inicial} onChange={e => setFormCaja({ ...formCaja, monto_inicial:e.target.value })} /></>
                 )}
                 {formCaja.tipo==='cierre' && (
                   <div style={{ background:'rgba(26,58,255,0.08)', border:'1px solid rgba(26,58,255,0.2)', borderRadius:12, padding:14, marginBottom:10 }}>
                     <div style={{ fontSize:13, fontWeight:600, color:c.text, marginBottom:8 }}>Resumen del día</div>
                     <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, marginBottom:4 }}><span style={{ color:c.muted }}>Total ingresos</span><span style={{ color:'#00D97E', fontWeight:600 }}>{formatGs(balanceHoy)}</span></div>
-                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, marginBottom:4 }}><span style={{ color:c.muted }}>Ventas</span><span>{ventasHoy.length}</span></div>
-                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}><span style={{ color:c.muted }}>Efectivo</span><span>{formatGs(ventasHoy.filter((v: any) => v.metodo_pago==='Efectivo').reduce((s: number, v: any) => s+(v.total||0), 0))}</span></div>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}><span style={{ color:c.muted }}>Ventas</span><span>{ventasHoy.length}</span></div>
                   </div>
                 )}
-                <Label text="Observaciones (opcional)" />
-                <input style={s.input} placeholder="Notas..." value={formCaja.observaciones} onChange={e => setFormCaja({ ...formCaja, observaciones:e.target.value })} />
+                <Label text="Observaciones (opcional)" /><input style={s.input} placeholder="Notas..." value={formCaja.observaciones} onChange={e => setFormCaja({ ...formCaja, observaciones:e.target.value })} />
                 <button style={{ ...s.btnYellow, width:'100%', marginTop:8 }} onClick={guardarCaja}>
                   {formCaja.tipo==='apertura' ? '🟢 Abrir caja' : '🔴 Cerrar caja'}
                 </button>
@@ -1317,37 +1458,43 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── TICKET DE VENTA — optimizado para impresora térmica ── */}
+      {/* TICKET DE VENTA */}
       {ticketVenta && (
         <div style={s.overlay} onClick={() => setTicketVenta(null)}>
           <div className="print-area" onClick={e => e.stopPropagation()}
             style={{ background:'#fff', borderRadius:12, padding:'16px 20px', width:'100%', maxWidth:320, color:'#000', fontFamily:'monospace' }}>
-            {/* Membrete */}
             <div style={{ textAlign:'center', marginBottom:10 }}>
               <div style={{ fontSize:18, fontWeight:700, letterSpacing:1 }}>NERY CELL</div>
               <div style={{ fontSize:11 }}>Tecnología · Accesorios · Reparaciones</div>
-              <div style={{ fontSize:11 }}>Quiindy, Paraguarí</div>
-              <div style={{ fontSize:11 }}>Tel: {CONTACTO.tel}</div>
+              <div style={{ fontSize:11 }}>Quiindy, Paraguarí · Tel: {CONTACTO.tel}</div>
             </div>
             <div style={{ borderTop:'1px dashed #000', borderBottom:'1px dashed #000', padding:'6px 0', margin:'8px 0', textAlign:'center', fontSize:11 }}>
-              COMPROBANTE DE VENTA<br />
-              {formatFecha(ticketVenta.created_at)} — {formatHora(ticketVenta.created_at)}
+              COMPROBANTE DE VENTA<br />{formatFecha(ticketVenta.created_at)} — {formatHora(ticketVenta.created_at)}
             </div>
+            {/* Items del carrito si existen */}
+            {ticketVenta.items && ticketVenta.items.length > 0 && (
+              <div style={{ marginBottom:8 }}>
+                <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>PRODUCTOS</div>
+                {ticketVenta.items.map((item: any) => (
+                  <div key={item.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'2px 0' }}>
+                    <span>{item.nombre} x{item.cantidad}</span>
+                    <span style={{ fontWeight:600 }}>{formatGs(item.precio_venta * item.cantidad)}</span>
+                  </div>
+                ))}
+                <div style={{ borderTop:'1px dashed #ccc', marginTop:4 }} />
+              </div>
+            )}
             <div style={{ marginBottom:8 }}>
               {[
-                ['Producto', ticketVenta.nombre_producto||'—'],
                 ['Cliente', ticketVenta.cliente_nombre||'—'],
-                ['Cantidad', ticketVenta.cantidad],
-                ['Precio unit.', formatGs(ticketVenta.precio_unitario)],
                 ['Método', ticketVenta.metodo_pago],
               ].map(([k, v]) => (
                 <div key={String(k)} style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'2px 0' }}>
-                  <span style={{ color:'#444' }}>{k}</span>
-                  <span style={{ fontWeight:600 }}>{v}</span>
+                  <span style={{ color:'#444' }}>{k}</span><span style={{ fontWeight:600 }}>{v}</span>
                 </div>
               ))}
               {ticketVenta.descuento_gs > 0 && (
-                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'2px 0', color:'#000' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'2px 0' }}>
                   <span>Descuento</span><span>-{formatGs(ticketVenta.descuento_gs)}</span>
                 </div>
               )}
@@ -1366,9 +1513,7 @@ export default function Home() {
               Cambios hasta 48 hs con comprobante.<br />Producto y envoltorio en perfecto estado.
             </div>
             <div style={{ borderTop:'1px dashed #000', paddingTop:6, textAlign:'center', fontSize:10 }}>
-              Tel: {CONTACTO.tel}<br />
-              IG: @{CONTACTO.instagram} · FB: {CONTACTO.facebook}<br />
-              TikTok: @{CONTACTO.tiktok}
+              Tel: {CONTACTO.tel}<br />IG: @{CONTACTO.instagram} · FB: {CONTACTO.facebook}<br />TikTok: @{CONTACTO.tiktok}
             </div>
             <div className="no-print" style={{ display:'flex', gap:10, marginTop:14 }}>
               <button style={{ ...s.btnYellow, flex:1, justifyContent:'center' }} onClick={() => window.print()}>🖨 Imprimir</button>
@@ -1378,7 +1523,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── ORDEN DE REPARACIÓN — optimizada para impresora térmica ── */}
+      {/* ORDEN DE REPARACIÓN */}
       {ticketRep && (
         <div style={s.overlay} onClick={() => setTicketRep(null)}>
           <div className="print-area" onClick={e => e.stopPropagation()}
@@ -1393,11 +1538,7 @@ export default function Home() {
             </div>
             <div style={{ marginBottom:6 }}>
               <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>DATOS DEL CLIENTE</div>
-              {[
-                ['Nombre', ticketRep.cliente_nombre],
-                ['Teléfono', ticketRep.cliente_telefono],
-                ...(ticketRep.cliente_direccion ? [['Dirección', ticketRep.cliente_direccion]] : []),
-              ].map(([k, v]) => (
+              {[['Nombre', ticketRep.cliente_nombre],['Teléfono', ticketRep.cliente_telefono], ...(ticketRep.cliente_direccion?[['Dirección', ticketRep.cliente_direccion]]:[])].map(([k,v]) => (
                 <div key={String(k)} style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'2px 0' }}>
                   <span style={{ color:'#444' }}>{k}</span><span style={{ fontWeight:600 }}>{v}</span>
                 </div>
@@ -1405,36 +1546,25 @@ export default function Home() {
             </div>
             <div style={{ borderTop:'1px dashed #000', paddingTop:6, marginBottom:6 }}>
               <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>DATOS DEL EQUIPO</div>
-              {[
-                ['Modelo', ticketRep.modelo_celular],
-                ['Problema', ticketRep.problema_reportado],
-                ['Técnico', ticketRep.tecnico],
-              ].map(([k, v]) => (
+              {[['Modelo', ticketRep.modelo_celular],['Problema', ticketRep.problema_reportado],['Técnico', ticketRep.tecnico]].map(([k,v]) => (
                 <div key={String(k)} style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'2px 0' }}>
                   <span style={{ color:'#444' }}>{k}</span><span style={{ fontWeight:600, textAlign:'right', maxWidth:'55%' }}>{v}</span>
                 </div>
               ))}
-              {ticketRep.observaciones && (
-                <div style={{ fontSize:11, marginTop:4, borderTop:'1px dashed #ccc', paddingTop:4 }}>Obs: {ticketRep.observaciones}</div>
-              )}
+              {ticketRep.observaciones && <div style={{ fontSize:11, marginTop:4, borderTop:'1px dashed #ccc', paddingTop:4 }}>Obs: {ticketRep.observaciones}</div>}
             </div>
             <div style={{ borderTop:'1px dashed #000', paddingTop:6, marginBottom:6 }}>
               <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>COSTO Y GARANTÍA</div>
               <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, fontWeight:700, marginBottom:4 }}>
-                <span>Costo estimado</span>
-                <span>{ticketRep.costo_estimado ? formatGs(ticketRep.costo_estimado) : 'A confirmar'}</span>
+                <span>Costo estimado</span><span>{ticketRep.costo_estimado ? formatGs(ticketRep.costo_estimado) : 'A confirmar'}</span>
               </div>
               <div style={{ fontSize:11 }}>Garantía: {ticketRep.garantia||'Sin garantía'}</div>
               {(ticketRep.garantia?.includes('sin garantía') || ticketRep.garantia?.includes('económico')) && (
-                <div style={{ fontSize:10, marginTop:4, fontStyle:'italic' }}>
-                  * Display económico. Sin garantía de fábrica.
-                </div>
+                <div style={{ fontSize:10, marginTop:4, fontStyle:'italic' }}>* Display económico. Sin garantía de fábrica.</div>
               )}
             </div>
             <div style={{ borderTop:'1px dashed #000', paddingTop:6, textAlign:'center', fontSize:10, lineHeight:1.6, marginBottom:10 }}>
-              Al retirar el equipo el cliente acepta las condiciones.<br />
-              Retirar dentro de los 30 días.<br />
-              Tel: {CONTACTO.tel} · IG: @{CONTACTO.instagram}
+              Al retirar el equipo el cliente acepta las condiciones.<br />Retirar dentro de los 30 días.<br />Tel: {CONTACTO.tel} · IG: @{CONTACTO.instagram}
             </div>
             <div className="no-print" style={{ display:'flex', gap:10 }}>
               <button style={{ ...s.btnYellow, flex:1, justifyContent:'center' }} onClick={() => window.print()}>🖨 Imprimir</button>
