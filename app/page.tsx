@@ -287,7 +287,10 @@ export default function Home() {
   }
 
   async function cambiarEstadoRep(id: string, estado: string) {
-    await supabase.from('reparaciones').update({ estado }).eq('id', id); cargarTodo()
+    const update: any = { estado }
+    if (estado === 'Entregado') update.fecha_entrega = new Date().toISOString()
+    await supabase.from('reparaciones').update(update).eq('id', id)
+    cargarTodo()
   }
 
   function handleFoto(e: any) {
@@ -315,9 +318,9 @@ export default function Home() {
   const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
   const hoy = new Date(); hoy.setHours(0,0,0,0)
 
-  const repsEntregadasHoy = reparaciones.filter(r => r.estado==='Entregado' && new Date(r.updated_at||r.fecha_ingreso) >= hoy)
-  const repsEntregadasMes = reparaciones.filter(r => { const d = new Date(r.updated_at||r.fecha_ingreso); return r.estado==='Entregado' && d >= inicioMes })
-  const repsEntregadasBalance = reparaciones.filter(r => { const d = new Date(r.updated_at||r.fecha_ingreso); return r.estado==='Entregado' && d.getMonth()===mesBalance && d.getFullYear()===anioBalance })
+  const repsEntregadasHoy = reparaciones.filter(r => r.estado==='Entregado' && r.fecha_entrega && new Date(r.fecha_entrega) >= hoy)
+  const repsEntregadasMes = reparaciones.filter(r => { const d = r.fecha_entrega ? new Date(r.fecha_entrega) : null; return r.estado==='Entregado' && d && d >= inicioMes })
+  const repsEntregadasBalance = reparaciones.filter(r => { const d = r.fecha_entrega ? new Date(r.fecha_entrega) : null; return r.estado==='Entregado' && d && d.getMonth()===mesBalance && d.getFullYear()===anioBalance })
   const ingresoRepsHoy = repsEntregadasHoy.reduce((s: number, r: any) => s+(r.costo_estimado||0), 0)
   const ingresoRepsMes = repsEntregadasMes.reduce((s: number, r: any) => s+(r.costo_estimado||0), 0)
   const ingresoRepsBalance = repsEntregadasBalance.reduce((s: number, r: any) => s+(r.costo_estimado||0), 0)
@@ -325,7 +328,8 @@ export default function Home() {
   const ventasHoy = ventas.filter(v => new Date(v.created_at) >= hoy)
   const ventasMes = ventas.filter(v => new Date(v.created_at) >= inicioMes)
   const gastosMes = gastos.filter(g => { const d = new Date(g.fecha); return d.getMonth()===ahora.getMonth() && d.getFullYear()===ahora.getFullYear() })
-  const gastosHoy = gastos.filter(g => { const d = new Date(g.fecha); const h = new Date(); h.setHours(0,0,0,0); return d >= h })
+  const hoyStr = new Date().toISOString().split('T')[0]
+const gastosHoy = gastos.filter(g => g.fecha === hoyStr)
   const gastosMesReales = gastosMes.filter(g => g.tipo !== 'Inversión')
   const inversionesMes = gastosMes.filter(g => g.tipo === 'Inversión')
   const totalGastosHoy = gastosHoy.filter(g => g.tipo !== 'Inversión').reduce((s: number, g: any) => s+(g.monto||0), 0)
