@@ -157,6 +157,18 @@ export default function Home() {
     }).select().single()
 
     if (error) { alert('Error al registrar: ' + error.message); return }
+
+    // Descontar stock de cada producto vendido (ignora items manuales)
+    for (const item of carrito) {
+      if (!item.id.toString().startsWith('manual-')) {
+        const productoActual = productos.find(p => p.id === item.id)
+        if (productoActual) {
+          const nuevoStock = Math.max(0, (productoActual.stock_actual || 0) - item.cantidad)
+          await supabase.from('productos').update({ stock_actual: nuevoStock }).eq('id', item.id)
+        }
+      }
+    }
+
     if (data) setTicketVenta({ ...data, items: carrito, cajero: cajaAbierta ? (cajaAbierta as any).empleado : null })
     limpiarCarrito(); cargarTodo()
   }
