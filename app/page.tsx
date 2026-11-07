@@ -35,7 +35,8 @@ export default function Home() {
   const [nombreCatEdit, setNombreCatEdit] = useState('')
   const [ventaSeleccionada, setVentaSeleccionada] = useState<any>(null)
   const [productoEditando, setProductoEditando] = useState<any>(null)
-  const [horaActual, setHoraActual] = useState(new Date())
+  const [horaActual, setHoraActual] = useState<Date | null>(null)
+const [montado, setMontado] = useState(false)
   const [montoRecibido, setMontoRecibido] = useState('')
   const [editandoDeuda, setEditandoDeuda] = useState<any>(null)
   // Carrito
@@ -73,11 +74,13 @@ export default function Home() {
 
   useEffect(() => { cargarTodo() }, [])
 
-  // Reloj en tiempo real
-  useEffect(() => {
-    const timer = setInterval(() => setHoraActual(new Date()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+    // Reloj en tiempo real (solo en el navegador)
+    useEffect(() => {
+      setMontado(true)
+      setHoraActual(new Date())
+      const timer = setInterval(() => setHoraActual(new Date()), 1000)
+      return () => clearInterval(timer)
+    }, [])
 
   async function cargarTodo() {
     const [{ data: v }, { data: r }, { data: p }, { data: cl }, { data: cat }, { data: g }, { data: caja }, { data: pagos }] = await Promise.all([
@@ -668,13 +671,17 @@ export default function Home() {
             <div style={{ width:28, height:28, background:'#fff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:13, color:'#1A3AFF' }}>N</div>
             <span style={{ fontWeight:700, fontSize:13, color:'#fff' }}>NERY CELL</span>
           </div>
-          {/* Reloj en tiempo real */}
-          <div style={{ marginTop:8, fontSize:11, color:c.muted }}>
-            {horaActual.toLocaleDateString('es-PY', { weekday:'short', day:'numeric', month:'short' })}
-          </div>
-          <div style={{ fontSize:18, fontWeight:700, color:c.text, letterSpacing:1 }}>
-            {horaActual.toLocaleTimeString('es-PY', { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
-          </div>
+                    {/* Reloj en tiempo real */}
+                    {montado && horaActual && (
+            <>
+              <div style={{ marginTop:8, fontSize:11, color:c.muted }}>
+                {horaActual.toLocaleDateString('es-PY', { weekday:'short', day:'numeric', month:'short' })}
+              </div>
+              <div style={{ fontSize:18, fontWeight:700, color:c.text, letterSpacing:1 }}>
+                {horaActual.toLocaleTimeString('es-PY', { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
+              </div>
+            </>
+          )}
           {cajeroActual && <div style={{ fontSize:11, color:'#00D97E', marginTop:2 }}>👤 Cajero: {cajeroActual}</div>}
         </div>
         <nav style={{ padding:'12px 10px', flex:1, overflowY:'auto' }}>
@@ -1606,9 +1613,22 @@ export default function Home() {
                 <div style={{ fontSize:11, marginTop:4, fontStyle:'italic', fontWeight:600 }}>* Display económico. Sin garantía de fábrica.</div>
               )}
             </div>
-            <div style={{ borderTop:'1px dashed #000', paddingTop:8, textAlign:'center', fontSize:11, lineHeight:1.6, marginBottom:12 }}>
-              <div style={{ fontWeight:700 }}>Al retirar el equipo el cliente acepta las condiciones.</div>
-              <div>Retirar dentro de los 30 días.</div>
+            <div style={{ borderTop:'1px dashed #000', paddingTop:8, marginBottom:10 }}>
+              <div style={{ fontSize:12, fontWeight:900, textTransform:'uppercase', textAlign:'center', marginBottom:6 }}>
+                Términos y Condiciones del Servicio
+              </div>
+              <div style={{ fontSize:10, lineHeight:1.5, fontWeight:600 }}>
+                <div style={{ marginBottom:4 }}>1. La garantía cubre exclusivamente el servicio técnico realizado, no otros componentes ni fallas ajenas al servicio realizado.</div>
+                <div style={{ marginBottom:4 }}>2. No se cubren daños por golpes, humedad, mal uso o manipulación de terceros.</div>
+                <div style={{ marginBottom:4 }}>3. El cliente debe verificar el funcionamiento del equipo al momento de retirarlo.</div>
+                <div style={{ marginBottom:4 }}>4. La garantía queda sin efecto si el equipo es manipulado por terceros después de la reparación.</div>
+                <div style={{ marginBottom:4 }}>5. Los equipos deben ser retirados dentro de los 30 días posteriores al aviso de finalización. Transcurrido dicho plazo sin ser retirados, Nery Cell se reserva el derecho de disponer del equipo conforme a la normativa vigente.</div>
+              </div>
+              <div style={{ fontSize:10, fontWeight:900, textAlign:'center', marginTop:8, padding:'6px 4px', border:'1px solid #000' }}>
+                IMPORTANTE: La recepción de este ticket implica la aceptación de todos los términos y condiciones del servicio técnico.
+              </div>
+            </div>
+            <div style={{ borderTop:'1px dashed #000', paddingTop:8, textAlign:'center', fontSize:11, marginBottom:12 }}>
               <div style={{ fontWeight:700 }}>Tel: {CONTACTO.tel} · IG: @{CONTACTO.instagram}</div>
             </div>
             <div className="no-print" style={{ display:'flex', gap:10 }}>
